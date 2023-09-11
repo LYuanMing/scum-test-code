@@ -26,9 +26,9 @@ side.
 #define LENGTH_PACKET 125 + LENGTH_CRC  ///< maximum length is 127 bytes
 #define LEN_RX_PKT 20 + LENGTH_CRC      ///< length of rx packet
 
-#define TIMER_PERIOD 7500  ///< 500 = 1ms@500kHz
+#define TIMER_PERIOD 15000  ///< 500 = 1ms@500kHz
 
-#define NUMPKT_PER_CFG 1
+#define NUMPKT_PER_CFG 5
 #define STEPS_PER_CONFIG 32
 
 //=========================== variables =======================================
@@ -136,18 +136,14 @@ int main(void) {
 
     while (1) {
         // loop through all configuration
-        for (app_vars.cfg_coarse = 0; app_vars.cfg_coarse < STEPS_PER_CONFIG;
+        for (app_vars.cfg_coarse = 22; app_vars.cfg_coarse < 25;
              app_vars.cfg_coarse++) {
             for (app_vars.cfg_mid = 0; app_vars.cfg_mid < STEPS_PER_CONFIG;
                  app_vars.cfg_mid++) {
                 for (app_vars.cfg_fine = 0;
                      app_vars.cfg_fine < STEPS_PER_CONFIG;
                      app_vars.cfg_fine++) {
-                    //                    printf(
-                    //                        "coarse=%d, middle=%d,
-                    //                        fine=%d\r\n",
-                    //                        app_vars.cfg_coarse,app_vars.cfg_mid,app_vars.cfg_fine
-                    //                    );
+                    printf("coarse=%d, middle=%d, fine=%d\r\n", app_vars.cfg_coarse,app_vars.cfg_mid,app_vars.cfg_fine);
                     for (i = 0; i < NUMPKT_PER_CFG; i++) {
                         while (app_vars.rxFrameStarted == true)
                             ;
@@ -172,7 +168,7 @@ int main(void) {
 
 //=========================== private =========================================
 
-void cb_startFrame_rx(uint32_t timestamp) { app_vars.rxFrameStarted = true; }
+void cb_startFrame_rx(uint32_t timestamp) { app_vars.rxFrameStarted = true;}
 
 void cb_endFrame_rx(uint32_t timestamp) {
     uint8_t i;

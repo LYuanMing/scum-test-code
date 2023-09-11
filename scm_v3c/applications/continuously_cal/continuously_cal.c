@@ -32,8 +32,8 @@ This calibration only applies on on signel channel, e.g. channel 11.
 #define RX_TIMEOUT 500       // 500 = 1ms@500kHz
 #define RX_ACK_TIMEOUT 1500  // 500 = 1ms@500kHz
 
-#define SWEEP_START ((24 << 10) | (0 << 5) | (0))
-#define SWEEP_END ((24 << 10) | (31 << 5) | (31))
+#define SWEEP_START ((23 << 10) | (0 << 5) | (0))
+#define SWEEP_END ((23 << 10) | (31 << 5) | (31))
 
 #define SETTING_SIZE 100
 #define BEACON_PERIOD 20        // seconds
@@ -354,7 +354,7 @@ void cb_endFrame_rx(uint32_t timestamp) {
                 app_vars.tx_list_index++;
                 break;
             case CONTINUOUSLY_CAL:
-
+								printf("%d\r\n", temperature);
                 app_vars.last_temperature = temperature;
 
                 app_vars.if_history[app_vars.history_index] =
@@ -447,7 +447,7 @@ void getFrequencyRx(
         ;
 
     // sweep settings to find the ones for RX
-
+		
     for (app_vars.current_setting = setting_start;
          app_vars.current_setting < setting_end; app_vars.current_setting++) {
         radio_rfOff();
@@ -468,11 +468,11 @@ void getFrequencyRx(
         while (app_vars.rx_done == 0)
             ;
     }
-
+		
     // update state and schedule next state
 
     app_vars.state = SWEEP_RX_DONE;
-    rftimer_setCompareIn(rftimer_readCounter() +
+		    rftimer_setCompareIn(rftimer_readCounter() +
                          app_vars.beacon_stops_in * SECOND_IN_TICKS);
 
     printf("schedule sweep Tx in %d seconds\r\n", app_vars.beacon_stops_in);
@@ -488,7 +488,7 @@ void getFrequencyRx(
 
     app_vars.rx_setting_candidate[DEFAULT_SETTING] =
         freq_setting_selection_median(app_vars.rx_settings_list);
-}
+		}
 
 void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
     uint16_t i;
@@ -501,7 +501,7 @@ void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
     printf("SWEEP_TX started\r\n");
 
     // sweep settings to find the ones for TX
-
+		
     for (app_vars.current_setting = setting_start;
          app_vars.current_setting < setting_end; app_vars.current_setting++) {
         // transmit probe frame
@@ -539,14 +539,14 @@ void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
         while (app_vars.rx_done == 0)
             ;
     }
-
+		
     // choose the first setting in the tx_settings_list within the threshold
     //      as the target tx frequency setting
 
     app_vars.tx_setting_candidate[DEFAULT_SETTING] =
         freq_setting_selection_fo_alternative(
             app_vars.tx_settings_list, app_vars.tx_settings_freq_offset_list);
-
+	 
     // calculate target count 2m
     //    i = 0;
     //    app_vars.target_count_2m = 0;
@@ -652,7 +652,7 @@ void update_target_settings(void) {
     }
     avg_fo /= HISTORY_SAMPLE_SIZE;
 
-    adjustment = (int16_t)(avg_fo - 2) / 10;
+    adjustment = (int16_t)(avg_fo + 8) / 9;
     app_vars.tx_setting_candidate[app_vars.setting_index] -= adjustment;
 
     // update target setting for 2M RC OSC
@@ -683,13 +683,13 @@ void update_target_settings(void) {
     //        tmp               = adjustment/7;
     //        RC2M_superfine   += tmp;
     //    }
-
+		
     set_2M_RC_frequency(31, 31, RC2M_coarse, RC2M_fine, RC2M_superfine);
 
     scm3c_hw_interface_set_RC2M_coarse(RC2M_coarse);
     scm3c_hw_interface_set_RC2M_fine(RC2M_fine);
     scm3c_hw_interface_set_RC2M_superfine(RC2M_superfine);
-
+		
     analog_scan_chain_write();
     analog_scan_chain_load();
 

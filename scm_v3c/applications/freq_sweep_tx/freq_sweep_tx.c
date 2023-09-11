@@ -25,14 +25,14 @@ side.
 #define LENGTH_PACKET 125 + LENGTH_CRC  ///< maximum length is 127 bytes
 #define LEN_TX_PKT 20 + LENGTH_CRC      ///< length of tx packet
 #define CHANNEL 11                      ///< 11=2.405GHz
-#define TIMER_PERIOD 2000               ///< 500 = 1ms@500kHz
+#define TIMER_PERIOD 15000               ///< 500 = 1ms@500kHz
 
-#define NUMPKT_PER_CFG 3
+#define NUMPKT_PER_CFG 10
 #define STEPS_PER_CONFIG 32
 
 //=========================== variables =======================================
 
-static const uint8_t payload_identity[] = "test.";
+static const uint8_t payload_identity[] = "P";
 
 typedef struct {
     uint8_t packet[LENGTH_PACKET];
@@ -127,25 +127,21 @@ int main(void) {
                sizeof(payload_identity) - 1);
 
         // loop through all configuration
-        for (cfg_coarse = 0; cfg_coarse < STEPS_PER_CONFIG; cfg_coarse++) {
+        for (cfg_coarse = 22; cfg_coarse < 25; cfg_coarse++) {
             for (cfg_mid = 0; cfg_mid < STEPS_PER_CONFIG; cfg_mid++) {
                 for (cfg_fine = 0; cfg_fine < STEPS_PER_CONFIG; cfg_fine++) {
-                    //                    printf(
-                    //                        "coarse=%d, middle=%d,
-                    //                        fine=%d\r\n",
-                    //                        cfg_coarse,cfg_mid,cfg_fine
-                    //                    );
+                    printf("coarse=%d, middle=%d, fine=%d\r\n", cfg_coarse,cfg_mid,cfg_fine);
                     j = sizeof(payload_identity) - 1;
                     app_vars.packet[j++] = '0' + cfg_coarse / 10;
                     app_vars.packet[j++] = '0' + cfg_coarse % 10;
-                    app_vars.packet[j++] = '.';
+                    //app_vars.packet[j++] = '.';
                     app_vars.packet[j++] = '0' + cfg_mid / 10;
                     app_vars.packet[j++] = '0' + cfg_mid % 10;
-                    app_vars.packet[j++] = '.';
+                    //app_vars.packet[j++] = '.';
                     app_vars.packet[j++] = '0' + cfg_fine / 10;
                     app_vars.packet[j++] = '0' + cfg_fine % 10;
-                    app_vars.packet[j++] = '.';
-
+                    //app_vars.packet[j++] = '.';
+							
                     for (i = 0; i < NUMPKT_PER_CFG; i++) {
                         radio_loadPacket(app_vars.packet, LEN_TX_PKT);
                         LC_FREQCHANGE(cfg_coarse, cfg_mid, cfg_fine);
