@@ -23,12 +23,13 @@ side.
 #define CRC_VALUE (*((unsigned int*)0x0000FFFC))
 #define CODE_LENGTH (*((unsigned int*)0x0000FFF8))
 
+#define LEN_WITHOUT_CRC 20
 #define LENGTH_PACKET 125 + LENGTH_CRC  ///< maximum length is 127 bytes
-#define LEN_RX_PKT 20 + LENGTH_CRC      ///< length of rx packet
+#define LEN_RX_PKT LEN_WITHOUT_CRC + LENGTH_CRC      ///< length of rx packet
 
-#define TIMER_PERIOD 15000  ///< 500 = 1ms@500kHz
+#define TIMER_PERIOD 7500  ///< 500 = 1ms@500kHz
 
-#define NUMPKT_PER_CFG 5
+#define NUMPKT_PER_CFG 100
 #define STEPS_PER_CONFIG 32
 
 //=========================== variables =======================================
@@ -55,7 +56,8 @@ typedef struct {
 } app_vars_t;
 
 app_vars_t app_vars;
-
+int32_t package_count = 0;
+uint8_t cksum = 0;
 //=========================== prototypes ======================================
 
 void cb_startFrame_rx(uint32_t timestamp);
@@ -136,14 +138,15 @@ int main(void) {
 
     while (1) {
         // loop through all configuration
-        for (app_vars.cfg_coarse = 22; app_vars.cfg_coarse < 25;
+        for (app_vars.cfg_coarse = 22; app_vars.cfg_coarse < 24;
              app_vars.cfg_coarse++) {
-            for (app_vars.cfg_mid = 0; app_vars.cfg_mid < STEPS_PER_CONFIG;
+            for (app_vars.cfg_mid = 23; app_vars.cfg_mid < 24;
                  app_vars.cfg_mid++) {
-                for (app_vars.cfg_fine = 0;
-                     app_vars.cfg_fine < STEPS_PER_CONFIG;
-                     app_vars.cfg_fine++) {
+                for (app_vars.cfg_fine = 22;
+                     app_vars.cfg_fine < 23;
+                     ) {
                     printf("coarse=%d, middle=%d, fine=%d\r\n", app_vars.cfg_coarse,app_vars.cfg_mid,app_vars.cfg_fine);
+										package_count = 0;
                     for (i = 0; i < NUMPKT_PER_CFG; i++) {
                         while (app_vars.rxFrameStarted == true)
                             ;
@@ -158,7 +161,8 @@ int main(void) {
                         while (app_vars.changeConfig == false)
                             ;
                     }
-                }
+										printf("%d.%d.%d received %d packages\r\n", app_vars.cfg_coarse,app_vars.cfg_mid,app_vars.cfg_fine, package_count);
+                } 
             }
         }
     }
@@ -171,24 +175,29 @@ int main(void) {
 void cb_startFrame_rx(uint32_t timestamp) { app_vars.rxFrameStarted = true;}
 
 void cb_endFrame_rx(uint32_t timestamp) {
-    uint8_t i;
+		uint32_t i = 0;
 
     radio_getReceivedFrame(&(app_vars.packet[0]), &app_vars.packet_len,
                            sizeof(app_vars.packet), &app_vars.rxpk_rssi,
                            &app_vars.rxpk_lqi);
 
     radio_rfOff();
-
     if (app_vars.packet_len == LEN_RX_PKT && (radio_getCrcOk())) {
         // Only record IF estimate, LQI, and CDR tau for valid packets
         app_vars.IF_estimate = radio_getIFestimate();
         app_vars.LQI_chip_errors = radio_getLQIchipErrors();
-
-        printf("pkt received on ch%d %c%c%c%c.%d.%d.%d\r\n", app_vars.packet[4],
-               app_vars.packet[0], app_vars.packet[1], app_vars.packet[2],
-               app_vars.packet[3], app_vars.cfg_coarse, app_vars.cfg_mid,
+			
+				cksum = 0;
+				for(i = 0; i < LEN_WITHOUT_CRC; i++)
+						cksum += app_vars.packet[i];
+				/*
+        printf("pkt received on ch%d %c%c%c%c. %d.%d.%d\r\n", 11,
+               app_vars.packet[0], app_vars.packet[1], app_vars.packet[2],app_vars.packet[3], app_vars.cfg_coarse, app_vars.cfg_mid,
                app_vars.cfg_fine);
-
+				*/
+				if (cksum == 0)
+				package_count++;
+				
         app_vars.packet_len = 0;
         memset(&app_vars.packet[0], 0, LENGTH_PACKET);
     }

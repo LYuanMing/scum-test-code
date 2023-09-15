@@ -22,17 +22,18 @@ side.
 #define CRC_VALUE (*((unsigned int*)0x0000FFFC))
 #define CODE_LENGTH (*((unsigned int*)0x0000FFF8))
 
-#define LENGTH_PACKET 125 + LENGTH_CRC  ///< maximum length is 127 bytes
+#define LEN_WITHOUT_CRC 7
+#define LENGTH_PACKET LEN_WITHOUT_CRC + LENGTH_CRC  ///< maximum length is 127 bytes
 #define LEN_TX_PKT 20 + LENGTH_CRC      ///< length of tx packet
 #define CHANNEL 11                      ///< 11=2.405GHz
-#define TIMER_PERIOD 15000               ///< 500 = 1ms@500kHz
+#define TIMER_PERIOD 7500               ///< 500 = 1ms@500kHz
 
-#define NUMPKT_PER_CFG 10
+#define NUMPKT_PER_CFG 100
 #define STEPS_PER_CONFIG 32
 
 //=========================== variables =======================================
 
-static const uint8_t payload_identity[] = "P";
+static const uint8_t payload_identity[] = "";
 
 typedef struct {
     uint8_t packet[LENGTH_PACKET];
@@ -47,6 +48,8 @@ app_vars_t app_vars;
 void cb_endFrame_tx(uint32_t timestamp);
 void cb_timer(void);
 
+static uint8_t check_sum(const uint8_t* buffer, int size);
+uint8_t sum = 0;
 //=========================== main ============================================
 
 int main(void) {
@@ -127,11 +130,44 @@ int main(void) {
                sizeof(payload_identity) - 1);
 
         // loop through all configuration
-        for (cfg_coarse = 22; cfg_coarse < 25; cfg_coarse++) {
-            for (cfg_mid = 0; cfg_mid < STEPS_PER_CONFIG; cfg_mid++) {
-                for (cfg_fine = 0; cfg_fine < STEPS_PER_CONFIG; cfg_fine++) {
+        for (cfg_coarse = 22; cfg_coarse < 23; cfg_coarse++) {
+            for (cfg_mid = 30; cfg_mid < 31; cfg_mid++) {
+                for (cfg_fine = 8; cfg_fine < 10; cfg_fine++) {
                     printf("coarse=%d, middle=%d, fine=%d\r\n", cfg_coarse,cfg_mid,cfg_fine);
                     j = sizeof(payload_identity) - 1;
+										/*
+                    app_vars.packet[j++] = '0' + cfg_fine / 10;
+                    app_vars.packet[j++] = '0' + cfg_fine % 10;
+											*/
+										app_vars.packet[j++] = cfg_coarse;
+										app_vars.packet[j++] = cfg_mid;
+										app_vars.packet[j++] = cfg_fine;
+										app_vars.packet[j++] = 'e';
+									
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+									/*
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+									
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+										
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
+										*/
+										app_vars.packet[j] = 0;
+										sum = check_sum(app_vars.packet, LEN_WITHOUT_CRC);
+										app_vars.packet[j++] = sum;
+									
+									/*
                     app_vars.packet[j++] = '0' + cfg_coarse / 10;
                     app_vars.packet[j++] = '0' + cfg_coarse % 10;
                     //app_vars.packet[j++] = '.';
@@ -141,6 +177,7 @@ int main(void) {
                     app_vars.packet[j++] = '0' + cfg_fine / 10;
                     app_vars.packet[j++] = '0' + cfg_fine % 10;
                     //app_vars.packet[j++] = '.';
+									*/
 							
                     for (i = 0; i < NUMPKT_PER_CFG; i++) {
                         radio_loadPacket(app_vars.packet, LEN_TX_PKT);
@@ -171,4 +208,15 @@ void cb_endFrame_tx(uint32_t timestamp) {
 void cb_timer(void) {
     // Tranmit the packet
     radio_txNow();
+}
+
+static uint8_t check_sum(const uint8_t* buffer, int size)
+{
+    uint8_t sum = 0;
+    while(size > 1) {
+        sum += *buffer++;
+        size -= sizeof(uint8_t);
+    }
+
+    return (~sum) + 1;
 }
