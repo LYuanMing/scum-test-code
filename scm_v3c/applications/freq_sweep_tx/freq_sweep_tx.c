@@ -22,7 +22,7 @@ side.
 #define CRC_VALUE (*((unsigned int*)0x0000FFFC))
 #define CODE_LENGTH (*((unsigned int*)0x0000FFF8))
 
-#define LEN_WITHOUT_CRC 7
+#define LEN_WITHOUT_CRC 5
 #define LENGTH_PACKET LEN_WITHOUT_CRC + LENGTH_CRC  ///< maximum length is 127 bytes
 #define LEN_TX_PKT 20 + LENGTH_CRC      ///< length of tx packet
 #define CHANNEL 11                      ///< 11=2.405GHz
@@ -131,8 +131,8 @@ int main(void) {
 
         // loop through all configuration
         for (cfg_coarse = 22; cfg_coarse < 23; cfg_coarse++) {
-            for (cfg_mid = 30; cfg_mid < 31; cfg_mid++) {
-                for (cfg_fine = 8; cfg_fine < 10; cfg_fine++) {
+            for (cfg_mid = 28; cfg_mid < STEPS_PER_CONFIG; cfg_mid++) {
+                for (cfg_fine = 0; cfg_fine < STEPS_PER_CONFIG; cfg_fine++) {
                     printf("coarse=%d, middle=%d, fine=%d\r\n", cfg_coarse,cfg_mid,cfg_fine);
                     j = sizeof(payload_identity) - 1;
 										/*
@@ -144,9 +144,9 @@ int main(void) {
 										app_vars.packet[j++] = cfg_fine;
 										app_vars.packet[j++] = 'e';
 									
-										app_vars.packet[j++] = 'e';
-										app_vars.packet[j++] = 'e';
 									/*
+										app_vars.packet[j++] = 'e';
+										app_vars.packet[j++] = 'e';
 										app_vars.packet[j++] = 'e';
 										app_vars.packet[j++] = 'e';
 										app_vars.packet[j++] = 'e';
