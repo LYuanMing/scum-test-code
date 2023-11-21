@@ -39,7 +39,7 @@ This calibration only applies on on signel channel, e.g. channel 11.
 #define BEACON_PERIOD 20        // seconds
 #define SECOND_IN_TICKS 500000  // 500000 = 1s@500kHz
 #define SENDING_INTERVAL 50000  // 50000  = 100ms@500kHz
-#define MEASUREMENT_INTERVAL 15000 // 25000   = 50ms@500kHz
+#define MEASUREMENT_INTERVAL 25000 // 25000   = 50ms@500kHz
 #define TICKS_OF_PERIODICAL_BEACON 125000 // 50000 = 100ms@500kHz
 #define MS_IN_TICKS 500 // 500 = 1ms@500kHz
 
@@ -615,7 +615,7 @@ void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
         freq_setting_selection_fo_alternative(
             app_vars.tx_settings_list, app_vars.tx_settings_freq_offset_list);
 	*/
-	app_vars.tx_setting_candidate[DEFAULT_SETTING] = ((23 & 0x001F) << 10) + ((18 & 0x001F) << 5) + (10 & 0x001F);
+	app_vars.tx_setting_candidate[DEFAULT_SETTING] = ((23 & 0x001F) << 10) + ((1 & 0x001F) << 5) + (1 & 0x001F);
     // calculate target count 2m
     //    i = 0;
     //    app_vars.target_count_2m = 0;
@@ -760,7 +760,7 @@ void inter_calibrate_2M_setting(void)
 	A = 2405 * count_2M_RC_measured;
 	B = 2 * count_LC_RX_measured * 960;
 	C = 193 * count_LC_RX_measured / 10 * 96;
-	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
+	// printf("A: %d, B: %d, C: %d\r\n", A, B, C);
 	adjustment_2M_RC_mid_simplified = (A - B) * 1000 / C;
 	printf("adjust_2M: %d\r\n", adjustment_2M_RC_mid_simplified);
 	
@@ -823,12 +823,14 @@ void inter_calibrate_Tx_setting(void)
 	B = 2405 * count_2M_RC_measured;
 	C = 8 * count_LC_TX_measured / 10 * 96;
 	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
-	adjustment_LC_TX_fine_simplified = (A - B) / C;
+	adjustment_LC_TX_fine_simplified = (A - B) * 1000 / C;
 	printf("adjust_LC: %d\r\n", adjustment_LC_TX_fine_simplified);
-	/*
+	
 	app_vars.tx_setting_candidate[DEFAULT_SETTING] -= adjustment_LC_TX_fine_simplified;
 	lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
-	*/
+	printf("TX setting:%d.%d.%d\r\n", (app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
+										(app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
+										(app_vars.tx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
 }
 
 void send_ack(void)
@@ -980,7 +982,7 @@ void lc_setting_edge_detection(uint16_t* setting, uint8_t txOrRx) {
         }
 
         if (i == 0) {
-            setting[0] = setting[1] + offset;
+            setting[0] = setting[0] + offset;
         } else {
             setting[1] = setting[0] + offset;
         }
