@@ -40,7 +40,7 @@ This calibration only applies on on signel channel, e.g. channel 11.
 #define SECOND_IN_TICKS 500000  // 500000 = 1s@500kHz
 #define SENDING_INTERVAL 50000  // 50000  = 100ms@500kHz
 #define MEASUREMENT_INTERVAL 25000 // 25000   = 50ms@500kHz
-#define TICKS_OF_PERIODICAL_BEACON 125000 // 50000 = 100ms@500kHz
+#define TICKS_OF_PERIODICAL_BEACON 150000 // 50000 = 100ms@500kHz
 #define MS_IN_TICKS 500 // 500 = 1ms@500kHz
 
 #define MAX_PKT_SIZE 127
@@ -355,7 +355,7 @@ void cb_timer(void) {
                 app_vars.rx_done = 1;
 				app_vars.periodical_timer_expired = 1;
 				app_vars.receving_count = rftimer_readCounter() - 19;
-				printf("timer expired, %d\r\n", app_vars.receving_count);
+				//printf("timer expired, %d\r\n", app_vars.receving_count);
             }
             break;
         default:
@@ -370,7 +370,7 @@ void cb_startFrame_rx(uint32_t timestamp) {
     read_counters_3B(&app_vars.count_2M, &app_vars.count_LC,
                      &app_vars.count_adc);
 	app_vars.receving_count = rftimer_readCounter();
-	printf("origin:%d\r\n", app_vars.receving_count);
+	printf("timer count:%d\r\n", app_vars.receving_count);
 }
 
 void cb_endFrame_rx(uint32_t timestamp) {
@@ -615,7 +615,7 @@ void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
         freq_setting_selection_fo_alternative(
             app_vars.tx_settings_list, app_vars.tx_settings_freq_offset_list);
 	*/
-	app_vars.tx_setting_candidate[DEFAULT_SETTING] = ((23 & 0x001F) << 10) + ((1 & 0x001F) << 5) + (1 & 0x001F);
+	app_vars.tx_setting_candidate[DEFAULT_SETTING] = ((23 & 0x001F) << 10) + ((18 & 0x001F) << 5) + (16 & 0x001F);
     // calculate target count 2m
     //    i = 0;
     //    app_vars.target_count_2m = 0;
@@ -683,6 +683,7 @@ void contiuously_calibration_start(void) {
 				rftimer_setCompareIn(app_vars.receving_count + (TICKS_OF_PERIODICAL_BEACON - 18 * MS_IN_TICKS));
 				app_vars.inter_calibration_flag = 0;
 				send_ack();
+				printf("-----------------------\r\n");
 			} else {
 				// timer is expired
 			}
@@ -821,16 +822,17 @@ void inter_calibrate_Tx_setting(void)
 	
 	A = count_LC_TX_measured * 2 * 960;
 	B = 2405 * count_2M_RC_measured;
-	C = 8 * count_LC_TX_measured / 10 * 96;
+	C = 8 * count_LC_TX_measured / 100;
 	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
-	adjustment_LC_TX_fine_simplified = (A - B) * 1000 / C;
+	adjustment_LC_TX_fine_simplified = (A - B) / C;
 	printf("adjust_LC: %d\r\n", adjustment_LC_TX_fine_simplified);
-	
+	/*
 	app_vars.tx_setting_candidate[DEFAULT_SETTING] -= adjustment_LC_TX_fine_simplified;
 	lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
 	printf("TX setting:%d.%d.%d\r\n", (app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
 										(app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
 										(app_vars.tx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
+	*/
 }
 
 void send_ack(void)
