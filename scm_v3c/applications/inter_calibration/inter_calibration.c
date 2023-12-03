@@ -615,7 +615,7 @@ void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
         freq_setting_selection_fo_alternative(
             app_vars.tx_settings_list, app_vars.tx_settings_freq_offset_list);
 	*/
-	app_vars.tx_setting_candidate[DEFAULT_SETTING] = ((23 & 0x001F) << 10) + ((18 & 0x001F) << 5) + (16 & 0x001F);
+	app_vars.tx_setting_candidate[DEFAULT_SETTING] = ((23 & 0x001F) << 10) + ((1 & 0x001F) << 5) + (1 & 0x001F);
     // calculate target count 2m
     //    i = 0;
     //    app_vars.target_count_2m = 0;
@@ -744,13 +744,13 @@ void inter_calibrate_2M_setting(void)
 	
 	// only for resetting the counters
     read_counters_3B(&count_2M, &count_LC, &count_adc);
-	printf("RX LC: %d, 2M: %d\r\n", count_LC, count_2M);
 	radio_rxEnable();
 	// waiting for the timer to end
 	while(app_vars.inter_calibration_timer_done == 0){};
 	
 	// read the counters again
     read_counters_3B(&count_2M, &count_LC, &count_adc);
+	printf("RX LC: %d, 2M: %d\r\n", count_LC, count_2M);
 	RC2M_coarse = scm3c_hw_interface_get_RC2M_coarse();
     RC2M_fine = scm3c_hw_interface_get_RC2M_fine();
     RC2M_superfine = scm3c_hw_interface_get_RC2M_superfine();
@@ -760,9 +760,9 @@ void inter_calibrate_2M_setting(void)
 	
 	A = 2405 * count_2M_RC_measured;
 	B = 2 * count_LC_RX_measured * 960;
-	C = 193 * count_LC_RX_measured / 10 * 96;
-	// printf("A: %d, B: %d, C: %d\r\n", A, B, C);
-	adjustment_2M_RC_mid_simplified = (A - B) * 1000 / C;
+	C = count_LC_RX_measured * 193 / 10;
+	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
+	adjustment_2M_RC_mid_simplified = (A - B) / C;
 	printf("adjust_2M: %d\r\n", adjustment_2M_RC_mid_simplified);
 	
 	
@@ -826,13 +826,13 @@ void inter_calibrate_Tx_setting(void)
 	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
 	adjustment_LC_TX_fine_simplified = (A - B) / C;
 	printf("adjust_LC: %d\r\n", adjustment_LC_TX_fine_simplified);
-	/*
+	
 	app_vars.tx_setting_candidate[DEFAULT_SETTING] -= adjustment_LC_TX_fine_simplified;
 	lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
 	printf("TX setting:%d.%d.%d\r\n", (app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
 										(app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
 										(app_vars.tx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
-	*/
+	
 }
 
 void send_ack(void)

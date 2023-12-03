@@ -108,7 +108,7 @@ int main(void) {
 
     // Initial frequency calibration will tune the frequencies for HCLK, the
     // RX/TX chip clocks, and the LO
-
+// #define FREQ_SWEEP_TX
 #ifdef FREQ_SWEEP_TX
     radio_txEnable();
 #else
@@ -118,13 +118,13 @@ int main(void) {
 #endif
 	restart_flag = 1;
     while (1) {
-		for (app_vars.cfg_coarse = 24; app_vars.cfg_coarse < 25; app_vars.cfg_coarse++) {
+		for (app_vars.cfg_coarse = 23; app_vars.cfg_coarse < 25; app_vars.cfg_coarse++) {
             for (app_vars.cfg_mid = 0; app_vars.cfg_mid <= 32; app_vars.cfg_mid++) {
                 for (app_vars.cfg_fine = 0; app_vars.cfg_fine <= 32; app_vars.cfg_fine++) {
 						if(restart_flag == 1) {
-							app_vars.cfg_coarse = 24;
-							app_vars.cfg_mid = 28;
-							app_vars.cfg_fine = 13;
+							app_vars.cfg_coarse = 23;
+							app_vars.cfg_mid = 29;
+							app_vars.cfg_fine = 9;
 							restart_flag = 0;
 						}
 						 printf("setting: %d.%d.%d \r\n", app_vars.cfg_coarse, app_vars.cfg_mid, app_vars.cfg_fine);
