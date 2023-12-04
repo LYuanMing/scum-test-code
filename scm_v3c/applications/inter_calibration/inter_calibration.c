@@ -833,7 +833,7 @@ void inter_calibrate_Tx_setting(void)
 	
 	A = count_LC_TX_measured * 2 * 960;
 	B = 2405 * count_2M_RC_measured;
-	C = 8 * count_LC_TX_measured / 100;
+	C = 8 * count_2M_RC_measured / 100;
 	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
 	adjustment_LC_TX_fine_simplified = (A - B) / C;
 	printf("adjust_LC: %d\r\n", adjustment_LC_TX_fine_simplified);
