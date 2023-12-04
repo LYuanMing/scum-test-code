@@ -381,6 +381,8 @@ void cb_endFrame_rx(uint32_t timestamp) {
 
     uint16_t temperature;
 	int32_t adjustment;
+	int32_t if_avg;
+	int16_t i;
 
     // disable timeout interrupt
     rftimer_disable_interrupts();
@@ -414,14 +416,23 @@ void cb_endFrame_rx(uint32_t timestamp) {
 				break;
             case CONTINUOUSLY_CAL:
 				// adjust RX according to IF
-				app_vars.if_history[0] = radio_getIFestimate();
-				printf("IF: %d\r\n", app_vars.if_history[0]);
-				adjustment = (((int32_t)app_vars.if_history[0] - 500)) / 16;
-				app_vars.rx_setting_candidate[DEFAULT_SETTING] += adjustment;
-				LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
-							   (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
-							   (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
-				lc_setting_edge_detection(app_vars.rx_setting_candidate, 0);
+				app_vars.if_history[app_vars.history_index++] = radio_getIFestimate();
+				printf("IF: %d\r\n", app_vars.if_history[app_vars.history_index - 1]);
+				if (app_vars.history_index == HISTORY_SAMPLE_SIZE) {
+					app_vars.history_index = 0;
+					for (i = 0; i < HISTORY_SAMPLE_SIZE; i++) {
+						if_avg += app_vars.if_history[i];
+					}
+					if_avg /= HISTORY_SAMPLE_SIZE;
+					adjustment = ((if_avg - 500)) / 16;
+					printf("adjustment: %d\r\n", adjustment);
+					app_vars.rx_setting_candidate[DEFAULT_SETTING] += adjustment;
+					LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
+								   (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
+								   (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
+					lc_setting_edge_detection(app_vars.rx_setting_candidate, 0);
+					
+				}
 				/*
                 app_vars.last_temperature = temperature;
                 app_vars.if_history[app_vars.history_index] =
