@@ -697,6 +697,16 @@ void contiuously_calibration_start(void) {
 				printf("-----------------------\r\n");
 			} else {
 				// timer is expired
+				/*
+				set_2M_RC_frequency(31, 31, 20, 12, 20);
+
+				scm3c_hw_interface_set_RC2M_coarse(20);
+				scm3c_hw_interface_set_RC2M_fine(12);
+				scm3c_hw_interface_set_RC2M_superfine(20);
+					
+				analog_scan_chain_write();
+				analog_scan_chain_load();
+				*/
 			}
 			app_vars.periodical_timer_expired = 0;
 			/*
@@ -742,6 +752,7 @@ void inter_calibrate_2M_setting(void)
 	uint32_t count_LC_RX_measured;
 	uint32_t count_2M_RC_measured;
 	int32_t adjustment_2M_RC_mid_simplified;
+	int32_t tmp;
 	uint32_t RC2M_coarse;
     uint32_t RC2M_fine;
     uint32_t RC2M_superfine;
@@ -769,23 +780,23 @@ void inter_calibrate_2M_setting(void)
 	count_LC_RX_measured = count_LC;
 	count_2M_RC_measured = count_2M;
 	
-	A = 2405 * count_2M_RC_measured;
-	B = 2 * count_LC_RX_measured * 960;
-	C = count_LC_RX_measured * 193 / 10;
+	
+	// A = 2405 * count_2M_RC_measured;
+	// B = 2 * count_LC_RX_measured * 960;
+	// C = count_LC_RX_measured * 1930 * 960 / 1000 / 1000 ===> C = count_LC_RX_measured * 193 * 96 / 10000
+    // ===> C = count_LC_RX_measured * 193 * 96 / 10000  ===> 2316 / 1250 ===> 1158 / 625
+	
+	// beware of overflow
+	// adjustment_2M_RC_mid_simplified = (A - B) / C
+	A = 2401 * count_2M_RC_measured; // MHz * Hz
+	B = 2 * count_LC_RX_measured * 960; // MHz * Hz
+	C = count_LC_RX_measured * 1158 / 125 ; // MHz * Hz
 	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
-	adjustment_2M_RC_mid_simplified = (A - B) / C;
+	adjustment_2M_RC_mid_simplified = (A - B) * 5 / C;
 	printf("adjust_2M: %d\r\n", adjustment_2M_RC_mid_simplified);
 	
 	
-	if (((int32_t)RC2M_fine) + adjustment_2M_RC_mid_simplified <= -1) {
-		RC2M_coarse--;
-		RC2M_fine = RC2M_fine + adjustment_2M_RC_mid_simplified + 32;
-	} else if (((int32_t)RC2M_fine) + adjustment_2M_RC_mid_simplified >= 32) {
-		RC2M_coarse++;
-		RC2M_fine = (RC2M_fine + adjustment_2M_RC_mid_simplified) % 32;
-	} else {
-		RC2M_fine = RC2M_fine + adjustment_2M_RC_mid_simplified;
-	}
+	RC2M_fine += adjustment_2M_RC_mid_simplified;
 	
 	set_2M_RC_frequency(31, 31, RC2M_coarse, RC2M_fine, RC2M_superfine);
 
@@ -831,9 +842,9 @@ void inter_calibrate_Tx_setting(void)
 	count_LC_TX_measured = count_LC;
 	count_2M_RC_measured = count_2M;
 	
-	A = count_LC_TX_measured * 2 * 960;
-	B = 2405 * count_2M_RC_measured;
-	C = 8 * count_2M_RC_measured / 100;
+	A = count_LC_TX_measured * 2 * 960; // MHz * Hz
+	B = 2405 * count_2M_RC_measured; // MHz * Hz
+	C = 8 * count_2M_RC_measured / 100; // MHz * Hz
 	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
 	adjustment_LC_TX_fine_simplified = (A - B) / C;
 	printf("adjust_LC: %d\r\n", adjustment_LC_TX_fine_simplified);

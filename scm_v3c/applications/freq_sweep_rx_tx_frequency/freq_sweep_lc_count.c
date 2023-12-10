@@ -116,6 +116,9 @@ int main(void) {
     // LDOs by calling radio rxEnable
     radio_rxEnable();
 #endif
+
+#define CAL_RC_OSC
+#ifndef CAL_RC_OSC
 	restart_flag = 1;
     while (1) {
 		for (app_vars.cfg_coarse = 23; app_vars.cfg_coarse < 25; app_vars.cfg_coarse++) {
@@ -141,6 +144,42 @@ int main(void) {
             }
         }
     }
+#else
+	restart_flag = 1;
+    while (1) {
+		for (app_vars.cfg_coarse = 27; app_vars.cfg_coarse < 32; app_vars.cfg_coarse++) {
+            for (app_vars.cfg_mid = 0; app_vars.cfg_mid <= 32; app_vars.cfg_mid++) {
+                for (app_vars.cfg_fine = 0; app_vars.cfg_fine <= 32; app_vars.cfg_fine++) {
+						if(restart_flag == 1) {
+							app_vars.cfg_coarse = 28;
+							app_vars.cfg_mid = 25;
+							app_vars.cfg_fine = 13;
+							restart_flag = 0;
+						}
+						printf("setting: %d.%d.%d \r\n", app_vars.cfg_coarse, app_vars.cfg_mid, app_vars.cfg_fine);
+						
+						set_2M_RC_frequency(31, 31, app_vars.cfg_coarse, app_vars.cfg_mid, app_vars.cfg_fine);
+
+						scm3c_hw_interface_set_RC2M_coarse(app_vars.cfg_coarse);
+						scm3c_hw_interface_set_RC2M_fine(app_vars.cfg_mid);
+						scm3c_hw_interface_set_RC2M_superfine(app_vars.cfg_fine);
+							
+						analog_scan_chain_write();
+						analog_scan_chain_load();
+						
+						 // repeat 100 times
+						 for (i = 0; i < 50; i++) {
+							 app_vars.timer_expire = 0;
+							 // only for resetting the counters
+							 read_counters_3B(&count_2M, &count_LC, &count_adc);
+							 rftimer_setCompareIn(rftimer_readCounter() + TIMER_PERIOD);
+							 while (app_vars.timer_expire == 0);
+						 }
+                } 
+            }
+        }
+    }
+#endif
 }
 
 //=========================== public ==========================================
