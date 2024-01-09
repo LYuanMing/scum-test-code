@@ -43,8 +43,8 @@ This calibration only applies on on signel channel, e.g. channel 11.
 #define TICKS_OF_PERIODICAL_BEACON 150000 // 50000 = 100ms@500kHz
 #define MS_IN_TICKS 500 // 500 = 1ms@500kHz
 
-#define MAX_PKT_SIZE 127
-#define TARGET_PKT_SIZE 5
+#define MAX_PKT_SIZE 125 + LENGTH_CRC
+#define TARGET_PKT_SIZE 5 + LENGTH_CRC
 
 #define HISTORY_SAMPLE_SIZE 10
 
@@ -54,7 +54,7 @@ This calibration only applies on on signel channel, e.g. channel 11.
 // when nextOrPrev ==  1: move to next     mid setting
 // when nextOrPrev == -1: move to previous mid setting
 #define CANDIDATE_SETTING_OFFSET_RX(nextOrPrev) (nextOrPrev * (32 - 6))
-#define CANDIDATE_SETTING_OFFSET_TX(nextOrPrev) (nextOrPrev * (32 - 8))
+#define CANDIDATE_SETTING_OFFSET_TX(nextOrPrev) (nextOrPrev * (32 - 6))
 #define SWITCH_COUNTER_MASK 0x01
 #define NUM_CANDIDATE_SETTING 2
 #define DEFAULT_SETTING 0
@@ -68,6 +68,18 @@ This calibration only applies on on signel channel, e.g. channel 11.
 #define MHz_2_kHz(MHz) ((MHz) * 1000)
 #define kHz_2_Hz(kHz) ((kHz) * 1000)
 #define MHz_2_Hz(MHz) ((MHz) * 1000000)
+
+// frequency difference in 2M RC coarse code is about 10.860621093749996  KHz
+// frequency difference in 2M RC fine code is about 1.597589717741936  KHz
+#define Hz_2M_RC_per_fine_code 1597
+#define Hz_2M_RC_per_coarse_code 10860
+
+// frequency difference in TX coarse code is about 14663.148989610949  KHz
+// frequency difference in TX middle code is about 794.8616541470408  KHz
+// frequency difference in TX find code is about 130.90244749698303  KHz
+#define Hz_TX_LC_per_fine_code 130902
+#define Hz_TX_LC_per_middle_code 794861
+#define Hz_TX_LC_per_coarse_code 14663148
 
 //=========================== variables =======================================
 
@@ -135,6 +147,9 @@ typedef struct {
 
 app_vars_t app_vars;
 uint16_t retry_index = 0;
+uint32_t freq;
+uint32_t packet_idx = 0;
+uint8_t DYNAMIC_SAMPLE_SIZE = 1;
 //=========================== prototypes ======================================
 
 void cb_timer(void);
@@ -158,7 +173,8 @@ void sync_timer(void);
 void inter_calibrate_2M_setting(void);
 void inter_calibrate_Tx_setting(void);
 void send_ack(void);
-
+void update_rc_setting(int32_t frequency_difference_RC_2M, uint32_t RC2M_coarse, uint32_t RC2M_fine, uint32_t RC2M_superfine);
+void update_tx_setting(int32_t frequency_difference_TX_LC);
 //=========================== main ============================================
 
 int main(void) {
@@ -370,7 +386,7 @@ void cb_startFrame_rx(uint32_t timestamp) {
     read_counters_3B(&app_vars.count_2M, &app_vars.count_LC,
                      &app_vars.count_adc);
 	app_vars.receving_count = rftimer_readCounter();
-	printf("timer count:%d\r\n", app_vars.receving_count);
+	// printf("timer count:%d\r\n", app_vars.receving_count);
 }
 
 void cb_endFrame_rx(uint32_t timestamp) {
@@ -388,9 +404,8 @@ void cb_endFrame_rx(uint32_t timestamp) {
     rftimer_disable_interrupts();
 
     radio_getReceivedFrame(&(pkt[0]), &pkt_len, sizeof(pkt), &rssi, &lqi);
-	printf("%d\r\n", pkt_len);
+	// printf("%d\r\n", pkt_len);
     if (radio_getCrcOk() && pkt_len == TARGET_PKT_SIZE) {
-        temperature = (pkt[0] << 8) | (pkt[1]);
 
         switch (app_vars.state) {
             case SWEEP_RX:
@@ -418,38 +433,29 @@ void cb_endFrame_rx(uint32_t timestamp) {
 				// adjust RX according to IF
 				app_vars.if_history[app_vars.history_index++] = radio_getIFestimate();
 				printf("IF: %d\r\n", app_vars.if_history[app_vars.history_index - 1]);
-				if (app_vars.history_index == HISTORY_SAMPLE_SIZE) {
+				if (app_vars.if_history[app_vars.history_index - 1] == 0) {
+					app_vars.history_index--;
+				}
+				if (app_vars.history_index == DYNAMIC_SAMPLE_SIZE) {
 					app_vars.history_index = 0;
-					for (i = 0; i < HISTORY_SAMPLE_SIZE; i++) {
+					for (i = 0; i < DYNAMIC_SAMPLE_SIZE; i++) {
 						if_avg += app_vars.if_history[i];
 					}
-					if_avg /= HISTORY_SAMPLE_SIZE;
+					if_avg /= DYNAMIC_SAMPLE_SIZE;
 					adjustment = ((if_avg - 500)) / 16;
-					printf("adjustment: %d\r\n", adjustment);
+					// printf("adjustment: %d\r\n", adjustment);
 					app_vars.rx_setting_candidate[DEFAULT_SETTING] += adjustment;
+					lc_setting_edge_detection(app_vars.rx_setting_candidate, 0);
 					LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
 								   (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
 								   (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
-					lc_setting_edge_detection(app_vars.rx_setting_candidate, 0);
-					
+					if (DYNAMIC_SAMPLE_SIZE < HISTORY_SAMPLE_SIZE) {
+						DYNAMIC_SAMPLE_SIZE++;
+					}
 				}
-				/*
-                app_vars.last_temperature = temperature;
-                app_vars.if_history[app_vars.history_index] =
-                    radio_getIFestimate();
-                app_vars.fo_history[app_vars.history_index] = (int8_t)(pkt[2]);
-                app_vars.count_2m_history[app_vars.history_index] =
-                    app_vars.count_2M;
-                app_vars.history_index += 1;
-                app_vars.history_index %= HISTORY_SAMPLE_SIZE;
-				
-                if (app_vars.history_index == 0) {
-                    update_target_settings();
-                    switch_lc_setting();
-                    lc_setting_edge_detection(app_vars.rx_setting_candidate, 0);
-                    lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
-                }
-				*/
+				printf("RX setting:%d.%d.%d\r\n", (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
+										          (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
+										          (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
 				
                 break;
             default:
@@ -547,7 +553,7 @@ void getFrequencyRx(
         while (app_vars.rx_done == 0)
             ;
     }
-		
+	
     // update state and schedule next state
 
     app_vars.state = SWEEP_RX_DONE;
@@ -564,11 +570,11 @@ void getFrequencyRx(
     //            app_vars.rx_settings_list,
     //            app_vars.rx_settings_if_count_list
     //        );
-	
-    app_vars.rx_setting_candidate[DEFAULT_SETTING] =
+	// app_vars.rx_setting_candidate[DEFAULT_SETTING] = ((23 & 0x001F) << 10) + ((13 & 0x001F) << 5) + (8 & 0x001F);
+	    app_vars.rx_setting_candidate[DEFAULT_SETTING] =
         freq_setting_selection_median(app_vars.rx_settings_list);
-		}
-
+}
+		
 void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
     uint16_t i;
     int8_t diff;
@@ -664,6 +670,8 @@ void contiuously_calibration_start(void) {
 
     // rftimer_setCompareIn(rftimer_readCounter() + SENDING_INTERVAL);
 
+	
+	
     while (1) {
 		if (app_vars.periodical_timer_expired || app_vars.rx_done) {
 			// listen for packet
@@ -681,9 +689,8 @@ void contiuously_calibration_start(void) {
 			while (app_vars.rx_done == 0)
 				;
 			if (app_vars.periodical_timer_expired == 0) {
-				printf("try: %d times\r\n", app_vars.retry_count);
+				// printf("try: %d times\r\n", app_vars.retry_count);
 				// timer is not expired, so it receive a packet
-				// rftimer_setCompareIn(rftimer_readCounter() + (TICKS_OF_PERIODICAL_BEACON - 10 * RX_TIMEOUT));
 				app_vars.retry_count = 99;
 				app_vars.rx_done = 0;
 				// start to calibrate oscillators
@@ -752,6 +759,7 @@ void inter_calibrate_2M_setting(void)
 	uint32_t count_LC_RX_measured;
 	uint32_t count_2M_RC_measured;
 	int32_t adjustment_2M_RC_mid_simplified;
+	int32_t frequency_difference_RC_2M;
 	int32_t tmp;
 	uint32_t RC2M_coarse;
     uint32_t RC2M_fine;
@@ -759,6 +767,8 @@ void inter_calibrate_2M_setting(void)
 	int32_t A;
 	int32_t B;
 	int32_t C;
+	
+	int32_t freq_distance;
 	
 	// start a timer
 	app_vars.inter_calibration_timer_done = 0;
@@ -780,33 +790,46 @@ void inter_calibrate_2M_setting(void)
 	count_LC_RX_measured = count_LC;
 	count_2M_RC_measured = count_2M;
 	
+	freq_distance = (count_2M_RC_measured - 100000) * 20;
+	freq_distance /= 1930;
 	
-	// A = 2405 * count_2M_RC_measured;
-	// B = 2 * count_LC_RX_measured * 960;
-	// C = count_LC_RX_measured * 1930 * 960 / 1000 / 1000 ===> C = count_LC_RX_measured * 193 * 96 / 10000
-    // ===> C = count_LC_RX_measured * 193 * 96 / 10000  ===> 2316 / 1250 ===> 1158 / 625
-	
+	//freq_distance = (count_LC_RX_measured - 125000) * 20 / 8;
+		
+	//freq = count_LC_RX_measured * 960 / MEASUREMENT_INTERVAL * 500 * 1000 / 1000000;
+	freq = count_LC_RX_measured * 4800 / MEASUREMENT_INTERVAL;
+		
 	// beware of overflow
 	// adjustment_2M_RC_mid_simplified = (A - B) / C
-	A = 2401 * count_2M_RC_measured; // MHz * Hz
+	// printf("freq: %d\r\n", freq);
+	//freq = 24020;
+	A = count_2M_RC_measured / 10 * freq; // MHz * Hz
 	B = 2 * count_LC_RX_measured * 960; // MHz * Hz
-	C = count_LC_RX_measured * 1158 / 125 ; // MHz * Hz
-	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
-	adjustment_2M_RC_mid_simplified = (A - B) * 5 / C;
-	printf("adjust_2M: %d\r\n", adjustment_2M_RC_mid_simplified);
-	
-	
-	RC2M_fine += adjustment_2M_RC_mid_simplified;
-	
-	set_2M_RC_frequency(31, 31, RC2M_coarse, RC2M_fine, RC2M_superfine);
-
-    scm3c_hw_interface_set_RC2M_coarse(RC2M_coarse);
-    scm3c_hw_interface_set_RC2M_fine(RC2M_fine);
-    scm3c_hw_interface_set_RC2M_superfine(RC2M_superfine);
 		
-    analog_scan_chain_write();
-    analog_scan_chain_load();
+	// C = count_LC_RX_measured * 1930 * 960 / 1000 / 1000 ===> C = count_LC_RX_measured * 193 * 96 / 10000
+    // ===> C = count_LC_RX_measured * 193 * 96 / 10000  ===> 2316 / 1250 ===> 1158 / 625
+	// C = count_LC_RX_measured * 1158 / 125 ; // MHz * Hz
 	
+	// * 1486 * 96 / 100 / 1000 ===> 4458 / 3125 ===> 743 * 6 / 125 / 25
+	// 15 * 96 / 1000 ===> 36 / 25
+	// C = count_LC_RX_measured * 36 / 5 ; // MHz * Hz
+	//printf("A: %d, B: %d, C: %d\r\n", A, B, C);
+	// adjustment_2M_RC_mid_simplified = (A - B) * 5 / C;
+	// printf("adjust_2M: %d, freq_distance: %d\r\n", adjustment_2M_RC_mid_simplified, freq_distance);
+	// RC2M_fine += (adjustment_2M_RC_mid_simplified);
+	
+	// recover origin frequency difference of 2M OSC, it should time 20 and then divide freq
+	// time 20 because (A - B) is obtained by 50ms timer, and 50ms times 20 is equal to 1s
+	// divide freq because A = freq * count_2M_RC_measured 
+	C = freq;
+	
+	frequency_difference_RC_2M = A - B;
+	// freq = 24015, freq / 10 = 2401.5   
+	// * 200 / C ===> * 20 / (freq / 10)
+	frequency_difference_RC_2M = frequency_difference_RC_2M * 200 / C;
+	
+	update_rc_setting(frequency_difference_RC_2M, RC2M_coarse, RC2M_fine, RC2M_superfine);
+	
+	printf("2M setting: %d.%d.%d\r\n", RC2M_coarse, RC2M_fine, RC2M_superfine);
 }
 
 void inter_calibrate_Tx_setting(void)
@@ -817,7 +840,7 @@ void inter_calibrate_Tx_setting(void)
 	uint32_t count_LC_TX_measured;
 	uint32_t count_2M_RC_measured;
 	int32_t adjustment_LC_TX_fine_simplified;
-	
+	int32_t frequency_difference_LC_TX;
 	int32_t A;
 	int32_t B;
 	int32_t C;
@@ -843,14 +866,31 @@ void inter_calibrate_Tx_setting(void)
 	count_2M_RC_measured = count_2M;
 	
 	A = count_LC_TX_measured * 2 * 960; // MHz * Hz
-	B = 2405 * count_2M_RC_measured; // MHz * Hz
-	C = 8 * count_2M_RC_measured / 100; // MHz * Hz
-	printf("A: %d, B: %d, C: %d\r\n", A, B, C);
+	B = (count_2M_RC_measured / 10) * (24050); // MHz * Hz
+	printf("B: %d\r\n", B); // don't delete this line
+
+	/* 
+	// 130.9KHz / 1000 ===> * 1309 / 10000
+	C = count_2M_RC_measured * 1309 / 10000; // MHz * Hz
 	adjustment_LC_TX_fine_simplified = (A - B) / C;
 	printf("adjust_LC: %d\r\n", adjustment_LC_TX_fine_simplified);
-	
 	app_vars.tx_setting_candidate[DEFAULT_SETTING] -= adjustment_LC_TX_fine_simplified;
 	lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
+	*/
+		
+	
+	C = 2;
+	// printf("A: %d, B: %d, C: %d\r\n", A, B, C);
+	frequency_difference_LC_TX = A - B;	
+	frequency_difference_LC_TX = frequency_difference_LC_TX * 20 / C;
+	/*
+	adjustment_LC_TX_fine_simplified = frequency_difference_LC_TX / Hz_TX_LC_per_fine_code;
+	app_vars.tx_setting_candidate[DEFAULT_SETTING] = app_vars.tx_setting_candidate[DEFAULT_SETTING] - adjustment_LC_TX_fine_simplified;
+	lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
+	*/
+	update_tx_setting(frequency_difference_LC_TX);
+	
+	
 	printf("TX setting:%d.%d.%d\r\n", (app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
 										(app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
 										(app_vars.tx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
@@ -863,9 +903,15 @@ void send_ack(void)
 	radio_rfOff();
 
 	app_vars.tx_done = 0;
-
-    pkt[0] = 'C';
-    pkt[1] = 'F';
+	printf("packet_idx: %d\r\n", packet_idx);
+    pkt[0] = 'P';
+	
+	pkt[1] = (packet_idx & 0xff000000) >> 24;
+	pkt[2] = (packet_idx & 0x00ff0000) >> 16;
+	pkt[3] = (packet_idx & 0x0000ff00) >> 8;
+	pkt[4] = (packet_idx & 0x000000ff);
+	
+	packet_idx++;
     radio_loadPacket(pkt, TARGET_PKT_SIZE);
 	LC_FREQCHANGE((app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
                (app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
@@ -878,6 +924,80 @@ void send_ack(void)
     while (app_vars.tx_done == 0){};
 }
 
+void update_rc_setting(int32_t frequency_difference_RC_2M, uint32_t RC2M_coarse, uint32_t RC2M_fine, uint32_t RC2M_superfine)
+{
+	// frequency difference in coarse code is about 10.860621093749996  KHz
+	// frequency difference in fine code is about 1.597589717741936  KHz
+	int32_t adjustment_coarse_code = 0;
+	int32_t adjustment_fine_code;
+	int32_t adjusted_fine_code;
+	// printf("frequency_difference_RC_2M: %d\r\n", frequency_difference_RC_2M);
+	
+	adjustment_fine_code = frequency_difference_RC_2M / Hz_2M_RC_per_fine_code;
+	adjusted_fine_code = RC2M_fine + adjustment_fine_code;
+	if (adjusted_fine_code < 0 || adjusted_fine_code >= 32) {
+		// it beyond the capacity of fine code, so we need to adjust coarse code too.
+		adjustment_coarse_code = frequency_difference_RC_2M / Hz_2M_RC_per_coarse_code;
+		frequency_difference_RC_2M = frequency_difference_RC_2M % Hz_2M_RC_per_coarse_code;
+		
+		adjustment_fine_code = frequency_difference_RC_2M / Hz_2M_RC_per_fine_code;
+		adjusted_fine_code = RC2M_fine;
+		adjusted_fine_code += adjustment_fine_code;
+	}
+	
+	if (adjusted_fine_code < 0) {
+		adjustment_coarse_code -= 1;
+		adjusted_fine_code += (Hz_2M_RC_per_coarse_code/Hz_2M_RC_per_fine_code); // 6 or 7 fine codes is equal to 1 corse code
+	} else if (adjusted_fine_code >= 32) {
+		adjustment_coarse_code += 1;
+		adjusted_fine_code -= (Hz_2M_RC_per_coarse_code/Hz_2M_RC_per_fine_code);
+	}
+	
+	RC2M_coarse += adjustment_coarse_code;
+	RC2M_fine = adjusted_fine_code;
+	
+	set_2M_RC_frequency(31, 31, RC2M_coarse, RC2M_fine, RC2M_superfine);
+
+    scm3c_hw_interface_set_RC2M_coarse(RC2M_coarse);
+    scm3c_hw_interface_set_RC2M_fine(RC2M_fine);
+    scm3c_hw_interface_set_RC2M_superfine(RC2M_superfine);
+		
+    analog_scan_chain_write();
+    analog_scan_chain_load();
+}
+
+void update_tx_setting(int32_t frequency_difference_TX_LC)
+{
+	// frequency difference in middle code is about 794.8616541470408  KHz
+	// frequency difference in find code is about 130.90244749698303  KHz
+	int32_t adjustment_middle_code = 0;
+	int32_t adjustment_fine_code = 0;
+	int32_t adjusted_fine_code = (app_vars.tx_setting_candidate[DEFAULT_SETTING]) & 0x001f;
+	
+	// printf("frequency_difference_TX_LC: %d\r\n", frequency_difference_TX_LC);
+	adjustment_fine_code = frequency_difference_TX_LC / Hz_TX_LC_per_fine_code;
+	adjusted_fine_code -= adjustment_fine_code;
+	if (adjusted_fine_code < 0 || adjusted_fine_code >= 32) {
+		// it beyond the capacity of fine code, so we need to adjust middle code too.
+		adjustment_middle_code = frequency_difference_TX_LC / Hz_TX_LC_per_middle_code;
+		frequency_difference_TX_LC = frequency_difference_TX_LC % Hz_TX_LC_per_middle_code;
+		
+		adjustment_fine_code = frequency_difference_TX_LC / Hz_TX_LC_per_fine_code;
+		adjusted_fine_code = (app_vars.tx_setting_candidate[DEFAULT_SETTING]) & 0x001f - adjustment_fine_code;
+	}
+	
+	if (adjusted_fine_code < 0) {
+		adjustment_middle_code += 1;
+		adjusted_fine_code += (Hz_TX_LC_per_middle_code / Hz_TX_LC_per_fine_code); // 6 or 7 fine codes is equal to 1 corse code
+	} else if (adjusted_fine_code >= 32) {
+		adjustment_middle_code -= 1;
+		adjusted_fine_code -= (Hz_TX_LC_per_middle_code / Hz_TX_LC_per_fine_code);
+	}
+	
+	app_vars.tx_setting_candidate[DEFAULT_SETTING] -= (adjustment_middle_code << 5);
+	app_vars.tx_setting_candidate[DEFAULT_SETTING] = (app_vars.tx_setting_candidate[DEFAULT_SETTING] & (~0x001f)) + (adjusted_fine_code & 0x001f);
+	
+}
 
 void update_target_settings(void) {
     uint8_t i;

@@ -108,7 +108,7 @@ int main(void) {
 
     // Initial frequency calibration will tune the frequencies for HCLK, the
     // RX/TX chip clocks, and the LO
-// #define FREQ_SWEEP_TX
+#define FREQ_SWEEP_TX
 #ifdef FREQ_SWEEP_TX
     radio_txEnable();
 #else
@@ -117,23 +117,30 @@ int main(void) {
     radio_rxEnable();
 #endif
 
+    // Enable optical SFD interrupt for optical calibration
+    optical_enable();
+
+    // Wait for optical cal to finish
+    while (optical_getCalibrationFinshed() == 0)
+        ;
+
 #define CAL_RC_OSC
 #ifndef CAL_RC_OSC
 	restart_flag = 1;
     while (1) {
-		for (app_vars.cfg_coarse = 23; app_vars.cfg_coarse < 25; app_vars.cfg_coarse++) {
-            for (app_vars.cfg_mid = 0; app_vars.cfg_mid <= 32; app_vars.cfg_mid++) {
-                for (app_vars.cfg_fine = 0; app_vars.cfg_fine <= 32; app_vars.cfg_fine++) {
+		for (app_vars.cfg_coarse = 22; app_vars.cfg_coarse < 25; app_vars.cfg_coarse++) {
+            for (app_vars.cfg_mid = 0; app_vars.cfg_mid < 32; app_vars.cfg_mid++) {
+                for (app_vars.cfg_fine = 0; app_vars.cfg_fine < 32; app_vars.cfg_fine++) {
 						if(restart_flag == 1) {
-							app_vars.cfg_coarse = 23;
-							app_vars.cfg_mid = 29;
-							app_vars.cfg_fine = 9;
+							app_vars.cfg_coarse = 24;
+							app_vars.cfg_mid = 17;
+							app_vars.cfg_fine = 22;
 							restart_flag = 0;
 						}
 						 printf("setting: %d.%d.%d \r\n", app_vars.cfg_coarse, app_vars.cfg_mid, app_vars.cfg_fine);
 						 LC_FREQCHANGE(app_vars.cfg_coarse, app_vars.cfg_mid, app_vars.cfg_fine);
 						 // repeat 100 times
-						 for (i = 0; i < 100; i++) {
+						 for (i = 0; i < 10; i++) {
 							 app_vars.timer_expire = 0;
 							 // only for resetting the counters
 							 read_counters_3B(&count_2M, &count_LC, &count_adc);
@@ -147,13 +154,13 @@ int main(void) {
 #else
 	restart_flag = 1;
     while (1) {
-		for (app_vars.cfg_coarse = 27; app_vars.cfg_coarse < 32; app_vars.cfg_coarse++) {
+		for (app_vars.cfg_coarse = 19; app_vars.cfg_coarse < 32; app_vars.cfg_coarse++) {
             for (app_vars.cfg_mid = 0; app_vars.cfg_mid <= 32; app_vars.cfg_mid++) {
                 for (app_vars.cfg_fine = 0; app_vars.cfg_fine <= 32; app_vars.cfg_fine++) {
 						if(restart_flag == 1) {
-							app_vars.cfg_coarse = 28;
-							app_vars.cfg_mid = 25;
-							app_vars.cfg_fine = 13;
+							app_vars.cfg_coarse = 21;
+							app_vars.cfg_mid = 3;
+							app_vars.cfg_fine = 7;
 							restart_flag = 0;
 						}
 						printf("setting: %d.%d.%d \r\n", app_vars.cfg_coarse, app_vars.cfg_mid, app_vars.cfg_fine);
@@ -168,7 +175,7 @@ int main(void) {
 						analog_scan_chain_load();
 						
 						 // repeat 100 times
-						 for (i = 0; i < 50; i++) {
+						 for (i = 0; i < 10; i++) {
 							 app_vars.timer_expire = 0;
 							 // only for resetting the counters
 							 read_counters_3B(&count_2M, &count_LC, &count_adc);
@@ -180,6 +187,7 @@ int main(void) {
         }
     }
 #endif
+	while(1) {};
 }
 
 //=========================== public ==========================================

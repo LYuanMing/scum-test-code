@@ -269,7 +269,18 @@ void optical_sfd_isr(void) {
         optical_vars.num_LC_ch11_ticks_in_100ms = count_LC;
         optical_vars.num_HFclock_ticks_in_100ms = count_HFclock;
 
-        // Debug prints
+		/*
+		set_2M_RC_frequency(31, 31, RC2M_coarse, RC2M_fine-2, RC2M_superfine);
+
+		scm3c_hw_interface_set_RC2M_coarse(RC2M_coarse);
+		scm3c_hw_interface_set_RC2M_fine(RC2M_fine-2);
+		scm3c_hw_interface_set_RC2M_superfine(RC2M_superfine);
+			
+		analog_scan_chain_write();
+		analog_scan_chain_load();
+		printf("initial 2M setting: %d.%d.%d\r\n", RC2M_coarse, RC2M_fine-2, RC2M_superfine);
+        */
+		// Debug prints
         // printf("LC_code=%d\r\n", optical_vars.LC_code);
         // printf("IF_fine=%d\r\n", IF_fine);
 
