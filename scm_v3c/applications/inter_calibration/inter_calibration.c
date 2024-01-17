@@ -147,7 +147,7 @@ typedef struct {
 
 app_vars_t app_vars;
 uint16_t retry_index = 0;
-uint32_t freq;
+volatile uint32_t freq;
 uint32_t packet_idx = 0;
 uint8_t DYNAMIC_SAMPLE_SIZE = 1;
 //=========================== prototypes ======================================
@@ -764,9 +764,9 @@ void inter_calibrate_2M_setting(void)
 	uint32_t RC2M_coarse;
     uint32_t RC2M_fine;
     uint32_t RC2M_superfine;
-	int32_t A;
-	int32_t B;
-	int32_t C;
+	volatile int32_t A;
+	volatile int32_t B;
+	volatile int32_t C;
 	
 	int32_t freq_distance;
 	
@@ -790,8 +790,8 @@ void inter_calibrate_2M_setting(void)
 	count_LC_RX_measured = count_LC;
 	count_2M_RC_measured = count_2M;
 	
-	freq_distance = (count_2M_RC_measured - 100000) * 20;
-	freq_distance /= 1930;
+	// freq_distance = (count_2M_RC_measured - 100000) * 20;
+	// freq_distance /= 1930;
 	
 	//freq_distance = (count_LC_RX_measured - 125000) * 20 / 8;
 		
@@ -800,8 +800,8 @@ void inter_calibrate_2M_setting(void)
 		
 	// beware of overflow
 	// adjustment_2M_RC_mid_simplified = (A - B) / C
-	// printf("freq: %d\r\n", freq);
-	//freq = 24020;
+	printf("freq: %d\r\n", freq);
+	freq = 24030;
 	A = count_2M_RC_measured / 10 * freq; // MHz * Hz
 	B = 2 * count_LC_RX_measured * 960; // MHz * Hz
 		
@@ -817,15 +817,12 @@ void inter_calibrate_2M_setting(void)
 	// printf("adjust_2M: %d, freq_distance: %d\r\n", adjustment_2M_RC_mid_simplified, freq_distance);
 	// RC2M_fine += (adjustment_2M_RC_mid_simplified);
 	
-	// recover origin frequency difference of 2M OSC, it should time 20 and then divide freq
-	// time 20 because (A - B) is obtained by 50ms timer, and 50ms times 20 is equal to 1s
-	// divide freq because A = freq * count_2M_RC_measured 
-	C = freq;
+	C = count_LC_RX_measured * 960 / 1000;
 	
 	frequency_difference_RC_2M = A - B;
 	// freq = 24015, freq / 10 = 2401.5   
 	// * 200 / C ===> * 20 / (freq / 10)
-	frequency_difference_RC_2M = frequency_difference_RC_2M * 200 / C;
+	frequency_difference_RC_2M = frequency_difference_RC_2M * 1000 / C;
 	
 	update_rc_setting(frequency_difference_RC_2M, RC2M_coarse, RC2M_fine, RC2M_superfine);
 	
@@ -841,9 +838,9 @@ void inter_calibrate_Tx_setting(void)
 	uint32_t count_2M_RC_measured;
 	int32_t adjustment_LC_TX_fine_simplified;
 	int32_t frequency_difference_LC_TX;
-	int32_t A;
-	int32_t B;
-	int32_t C;
+	volatile int32_t A;
+	volatile int32_t B;
+	volatile int32_t C;
 	LC_FREQCHANGE((app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
                (app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
                (app_vars.tx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
@@ -866,30 +863,28 @@ void inter_calibrate_Tx_setting(void)
 	count_2M_RC_measured = count_2M;
 	
 	A = count_LC_TX_measured * 2 * 960; // MHz * Hz
-	B = (count_2M_RC_measured / 10) * (24050); // MHz * Hz
-	printf("B: %d\r\n", B); // don't delete this line
+	B = (count_2M_RC_measured / 10) * (24055); // MHz * Hz
+	// printf("B: %d\r\n", B); // don't delete this line
 
-	/* 
+	
 	// 130.9KHz / 1000 ===> * 1309 / 10000
-	C = count_2M_RC_measured * 1309 / 10000; // MHz * Hz
+	C = count_2M_RC_measured * (Hz_TX_LC_per_fine_code / 100) / 10000; // MHz * Hz0
 	adjustment_LC_TX_fine_simplified = (A - B) / C;
-	printf("adjust_LC: %d\r\n", adjustment_LC_TX_fine_simplified);
+	//printf("adjust_LC: %d\r\n", adjustment_LC_TX_fine_simplified);
 	app_vars.tx_setting_candidate[DEFAULT_SETTING] -= adjustment_LC_TX_fine_simplified;
 	lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
-	*/
-		
 	
+		
+	/*
 	C = 2;
 	// printf("A: %d, B: %d, C: %d\r\n", A, B, C);
 	frequency_difference_LC_TX = A - B;	
 	frequency_difference_LC_TX = frequency_difference_LC_TX * 20 / C;
-	/*
-	adjustment_LC_TX_fine_simplified = frequency_difference_LC_TX / Hz_TX_LC_per_fine_code;
-	app_vars.tx_setting_candidate[DEFAULT_SETTING] = app_vars.tx_setting_candidate[DEFAULT_SETTING] - adjustment_LC_TX_fine_simplified;
-	lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
-	*/
+	// adjustment_LC_TX_fine_simplified = frequency_difference_LC_TX / Hz_TX_LC_per_fine_code;
+	// app_vars.tx_setting_candidate[DEFAULT_SETTING] = app_vars.tx_setting_candidate[DEFAULT_SETTING] - adjustment_LC_TX_fine_simplified;
+	// lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
 	update_tx_setting(frequency_difference_LC_TX);
-	
+	*/
 	
 	printf("TX setting:%d.%d.%d\r\n", (app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
 										(app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
@@ -931,6 +926,7 @@ void update_rc_setting(int32_t frequency_difference_RC_2M, uint32_t RC2M_coarse,
 	int32_t adjustment_coarse_code = 0;
 	int32_t adjustment_fine_code;
 	int32_t adjusted_fine_code;
+	int32_t intermediate_result = RC2M_coarse;
 	// printf("frequency_difference_RC_2M: %d\r\n", frequency_difference_RC_2M);
 	
 	adjustment_fine_code = frequency_difference_RC_2M / Hz_2M_RC_per_fine_code;
@@ -952,8 +948,9 @@ void update_rc_setting(int32_t frequency_difference_RC_2M, uint32_t RC2M_coarse,
 		adjustment_coarse_code += 1;
 		adjusted_fine_code -= (Hz_2M_RC_per_coarse_code/Hz_2M_RC_per_fine_code);
 	}
-	
-	RC2M_coarse += adjustment_coarse_code;
+	intermediate_result += adjustment_coarse_code;
+	if ((intermediate_result >= 0) && (intermediate_result) < 32)
+		RC2M_coarse = intermediate_result;
 	RC2M_fine = adjusted_fine_code;
 	
 	set_2M_RC_frequency(31, 31, RC2M_coarse, RC2M_fine, RC2M_superfine);
