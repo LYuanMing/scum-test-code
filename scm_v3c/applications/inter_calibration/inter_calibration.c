@@ -796,12 +796,12 @@ void inter_calibrate_2M_setting(void)
 	//freq_distance = (count_LC_RX_measured - 125000) * 20 / 8;
 		
 	//freq = count_LC_RX_measured * 960 / MEASUREMENT_INTERVAL * 500 * 1000 / 1000000;
-	freq = count_LC_RX_measured * 4800 / MEASUREMENT_INTERVAL;
+	// freq = count_LC_RX_measured * 4800 / MEASUREMENT_INTERVAL;
 		
 	// beware of overflow
 	// adjustment_2M_RC_mid_simplified = (A - B) / C
 	printf("freq: %d\r\n", freq);
-	freq = 24030;
+	freq = 24031;
 	A = count_2M_RC_measured / 10 * freq; // MHz * Hz
 	B = 2 * count_LC_RX_measured * 960; // MHz * Hz
 		
@@ -863,7 +863,7 @@ void inter_calibrate_Tx_setting(void)
 	count_2M_RC_measured = count_2M;
 	
 	A = count_LC_TX_measured * 2 * 960; // MHz * Hz
-	B = (count_2M_RC_measured / 10) * (24055); // MHz * Hz
+	B = (count_2M_RC_measured / 10) * (24050); // MHz * Hz
 	// printf("B: %d\r\n", B); // don't delete this line
 
 	
