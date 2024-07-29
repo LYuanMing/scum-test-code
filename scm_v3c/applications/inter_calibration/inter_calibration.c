@@ -659,7 +659,6 @@ void contiuously_calibration_start(void) {
 
     while (app_vars.state != SWEEP_TX_DONE)
         ;
-	printf("SYNC_TIMER started\r\n");
 	app_vars.state = SYNC_TIMER;
 	// sync the timer
 	sync_timer();
@@ -801,7 +800,7 @@ void inter_calibrate_2M_setting(void)
 	// beware of overflow
 	// adjustment_2M_RC_mid_simplified = (A - B) / C
 	printf("freq: %d\r\n", freq);
-	freq = 24031;
+	freq = 24024;
 	A = count_2M_RC_measured / 10 * freq; // MHz * Hz
 	B = 2 * count_LC_RX_measured * 960; // MHz * Hz
 		
