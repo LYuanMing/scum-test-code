@@ -130,8 +130,8 @@ int main(void) {
                sizeof(payload_identity) - 1);
 
         // loop through all configuration
-        for (cfg_coarse = 22; cfg_coarse < 23; cfg_coarse++) {
-            for (cfg_mid = 28; cfg_mid < STEPS_PER_CONFIG; cfg_mid++) {
+        for (cfg_coarse = 23; cfg_coarse < 24; cfg_coarse++) {
+            for (cfg_mid = 0; cfg_mid < STEPS_PER_CONFIG; cfg_mid++) {
                 for (cfg_fine = 0; cfg_fine < STEPS_PER_CONFIG; cfg_fine++) {
                     printf("coarse=%d, middle=%d, fine=%d\r\n", cfg_coarse,cfg_mid,cfg_fine);
                     j = sizeof(payload_identity) - 1;

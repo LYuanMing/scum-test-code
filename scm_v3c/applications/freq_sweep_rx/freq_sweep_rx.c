@@ -23,15 +23,15 @@ side.
 #define CRC_VALUE (*((unsigned int*)0x0000FFFC))
 #define CODE_LENGTH (*((unsigned int*)0x0000FFF8))
 
-#define LEN_WITHOUT_CRC 20
+#define LEN_WITHOUT_CRC 5
 #define LENGTH_PACKET 125 + LENGTH_CRC  ///< maximum length is 127 bytes
 #define LEN_RX_PKT LEN_WITHOUT_CRC + LENGTH_CRC      ///< length of rx packet
 
-#define TIMER_PERIOD 7500  ///< 500 = 1ms@500kHz
+#define TIMER_PERIOD 5000  ///< 500 = 1ms@500kHz
 
 #define NUMPKT_PER_CFG 100
 #define STEPS_PER_CONFIG 32
-
+#define MEASUREMENT_INTERVAL 25000 // 25000   = 50ms@500kHz
 //=========================== variables =======================================
 
 typedef struct {
@@ -53,6 +53,8 @@ typedef struct {
     uint8_t cfg_coarse;
     uint8_t cfg_mid;
     uint8_t cfg_fine;
+	
+	uint8_t inter_calibration_timer_done;
 } app_vars_t;
 
 app_vars_t app_vars;
@@ -67,6 +69,12 @@ void cb_timer(void);
 //=========================== main ============================================
 
 int main(void) {
+	
+    volatile uint32_t freq;
+	uint32_t count_2M;
+    uint32_t count_LC;
+    uint32_t count_adc;
+	
     uint32_t calc_crc;
 
     uint8_t i;
@@ -133,18 +141,37 @@ int main(void) {
 
     // Enable interrupts for the radio FSM
     radio_enable_interrupts();
-
     // configure
-
     while (1) {
         // loop through all configuration
-        for (app_vars.cfg_coarse = 22; app_vars.cfg_coarse < 24;
+        for (app_vars.cfg_coarse = 23; app_vars.cfg_coarse < 28;
              app_vars.cfg_coarse++) {
-            for (app_vars.cfg_mid = 23; app_vars.cfg_mid < 24;
+            for (app_vars.cfg_mid = 0; app_vars.cfg_mid < 31;
                  app_vars.cfg_mid++) {
-                for (app_vars.cfg_fine = 22;
-                     app_vars.cfg_fine < 23;
+                for (app_vars.cfg_fine = 0;
+                     app_vars.cfg_fine < 31;
+					 app_vars.cfg_fine++
                      ) {
+						/*
+                        radio_rfOff();
+                        LC_FREQCHANGE(app_vars.cfg_coarse, app_vars.cfg_mid,
+                                      app_vars.cfg_fine);
+                        radio_rxEnable();
+                        app_vars.inter_calibration_timer_done = 0;
+						rftimer_setCompareIn(rftimer_readCounter() + MEASUREMENT_INTERVAL);
+	
+						// only for resetting the counters
+						read_counters_3B(&count_2M, &count_LC, &count_adc);
+						radio_rxEnable();
+						// waiting for the timer to end
+						while(app_vars.inter_calibration_timer_done == 0){};
+						
+						// read the counters again
+						read_counters_3B(&count_2M, &count_LC, &count_adc);
+						freq = count_LC * 4800 / MEASUREMENT_INTERVAL;
+						printf("%d.%d.%d freq: %d\r\n", app_vars.cfg_coarse, app_vars.cfg_mid, app_vars.cfg_fine, freq);
+							*/
+					
                     printf("coarse=%d, middle=%d, fine=%d\r\n", app_vars.cfg_coarse,app_vars.cfg_mid,app_vars.cfg_fine);
 										package_count = 0;
                     for (i = 0; i < NUMPKT_PER_CFG; i++) {
@@ -161,7 +188,8 @@ int main(void) {
                         while (app_vars.changeConfig == false)
                             ;
                     }
-										printf("%d.%d.%d received %d packages\r\n", app_vars.cfg_coarse,app_vars.cfg_mid,app_vars.cfg_fine, package_count);
+					printf("%d.%d.%d received %d packages\r\n", app_vars.cfg_coarse,app_vars.cfg_mid,app_vars.cfg_fine, package_count);
+					
                 } 
             }
         }
@@ -184,6 +212,7 @@ void cb_endFrame_rx(uint32_t timestamp) {
     radio_rfOff();
     if (app_vars.packet_len == LEN_RX_PKT && (radio_getCrcOk())) {
         // Only record IF estimate, LQI, and CDR tau for valid packets
+		printf("got it\r\n");
         app_vars.IF_estimate = radio_getIFestimate();
         app_vars.LQI_chip_errors = radio_getLQIchipErrors();
 			
@@ -208,4 +237,7 @@ void cb_endFrame_rx(uint32_t timestamp) {
     app_vars.rxFrameStarted = false;
 }
 
-void cb_timer(void) { app_vars.changeConfig = true; }
+void cb_timer(void) { 
+app_vars.changeConfig = true; 
+app_vars.inter_calibration_timer_done = 1;
+}

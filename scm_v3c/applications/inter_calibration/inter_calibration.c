@@ -32,8 +32,10 @@ This calibration only applies on on signel channel, e.g. channel 11.
 #define RX_TIMEOUT 500       // 500 = 1ms@500kHz
 #define RX_ACK_TIMEOUT 1500  // 500 = 1ms@500kHz
 
-#define SWEEP_START ((23 << 10) | (0 << 5) | (0))
-#define SWEEP_END ((23 << 10) | (31 << 5) | (31))
+#define COARSE_RANGE 23
+
+#define SWEEP_START ((COARSE_RANGE << 10) | (0 << 5) | (0))
+#define SWEEP_END ((COARSE_RANGE << 10) | (31 << 5) | (31))
 
 #define SETTING_SIZE 100
 #define BEACON_PERIOD 20        // seconds
@@ -44,7 +46,7 @@ This calibration only applies on on signel channel, e.g. channel 11.
 #define MS_IN_TICKS 500 // 500 = 1ms@500kHz
 
 #define MAX_PKT_SIZE 125 + LENGTH_CRC
-#define TARGET_PKT_SIZE 5 + LENGTH_CRC
+#define TARGET_PKT_SIZE 3 + LENGTH_CRC
 
 #define HISTORY_SAMPLE_SIZE 10
 
@@ -90,6 +92,7 @@ typedef enum {
     SWEEP_TX_DONE = 3,
 	SYNC_TIMER = 4,
     CONTINUOUSLY_CAL = 5,
+	TIMER = 6,
 } state_t;
 
 typedef struct {
@@ -126,9 +129,15 @@ typedef struct {
 
     // for continuously calibration
     uint32_t if_history[HISTORY_SAMPLE_SIZE];
-    int8_t fo_history[HISTORY_SAMPLE_SIZE];
-    uint32_t count_2m_history[HISTORY_SAMPLE_SIZE];
-    uint8_t history_index;
+    uint32_t rx_lc_history[HISTORY_SAMPLE_SIZE];
+    uint32_t tx_lc_history[HISTORY_SAMPLE_SIZE];
+    uint32_t rx_rc_history[HISTORY_SAMPLE_SIZE];
+    uint32_t tx_rc_history[HISTORY_SAMPLE_SIZE];
+	
+    uint8_t if_history_index;
+	uint8_t rx_history_index;
+	uint8_t tx_history_index;
+	
     uint32_t target_count_2m;
 
     // last temperature
@@ -142,7 +151,7 @@ typedef struct {
     uint16_t rx_setting_candidate[NUM_CANDIDATE_SETTING];
     uint8_t switch_counter;
     uint8_t setting_index;
-
+	uint8_t unbroken_packet;
 } app_vars_t;
 
 app_vars_t app_vars;
@@ -150,6 +159,11 @@ uint16_t retry_index = 0;
 volatile uint32_t freq;
 uint32_t packet_idx = 0;
 uint8_t DYNAMIC_SAMPLE_SIZE = 1;
+/*
+uint32_t last_count_TX_LC = 0;
+uint32_t last_count_TX_RC = 0;
+uint32_t last_freq = 24050;
+*/
 //=========================== prototypes ======================================
 
 void cb_timer(void);
@@ -161,7 +175,6 @@ void cb_endFrame_rx(uint32_t timestamp);
 void getFrequencyTx(uint16_t setting_start, uint16_t setting_end);
 void getFrequencyRx(uint16_t setting_start, uint16_t setting_end);
 void contiuously_calibration_start(void);
-void update_target_settings(void);
 void switch_lc_setting(void);
 void lc_setting_edge_detection(uint16_t* settings, uint8_t txOrRx);
 
@@ -183,7 +196,13 @@ int main(void) {
     uint8_t i;
     uint8_t j;
     uint8_t offset;
+	
+	uint32_t count_2M;
+    uint32_t count_LC;
+    uint32_t count_adc;
 
+    uint32_t count_RX_LC;
+	
     memset(&app_vars, 0, sizeof(app_vars_t));
 
     app_vars.beacon_stops_in = BEACON_PERIOD;
@@ -241,11 +260,58 @@ int main(void) {
         ;
 
     printf("Cal complete\r\n");
-
-    app_vars.target_count_2m = TARGET_2M_COUNT;
-
+	
+	app_vars.state = TIMER;
+	
+	#if 0
+	for(i = 15; i <= 16; i++) 
+	#endif
+	{
+		
+		
+		LC_FREQCHANGE(COARSE_RANGE, 15, i);
+		
+		app_vars.inter_calibration_timer_done = 0;
+		rftimer_setCompareIn(rftimer_readCounter() + MEASUREMENT_INTERVAL * 2);
+		
+		// only for resetting the counters
+		read_counters_3B(&count_2M, &count_LC, &count_adc);
+		radio_rxEnable();
+		// waiting for the timer to end
+		while(app_vars.inter_calibration_timer_done == 0){};
+		
+		// read the counters again
+		read_counters_3B(&count_2M, &count_LC, &count_adc);
+		printf("test_RX_LC: %d, 2M: %d\r\n", count_LC, count_2M);
+		count_RX_LC = count_LC;
+			
+		app_vars.inter_calibration_timer_done = 0;
+		rftimer_setCompareIn(rftimer_readCounter() + MEASUREMENT_INTERVAL * 2);
+		
+		// only for resetting the counters
+		read_counters_3B(&count_2M, &count_LC, &count_adc);
+		radio_txEnable();
+		// waiting for the timer to end
+		while(app_vars.inter_calibration_timer_done == 0){};
+		
+		// read the counters again
+		read_counters_3B(&count_2M, &count_LC, &count_adc);
+		printf("test_TX_LC: %d, 2M: %d\r\n", count_LC, count_2M);
+			
+		printf("difference: %d\r\n\r\n", count_LC - count_RX_LC);
+	}
+	
+		
+		
+	
+		
+		
     app_vars.state = SWEEP_RX;
 
+	
+	app_vars.inter_calibration_timer_done = 0;
+	rftimer_setCompareIn(rftimer_readCounter() + MEASUREMENT_INTERVAL);
+	
     while (1) {
         // obtain frequency setting for RX
         getFrequencyRx(SWEEP_START, SWEEP_END);
@@ -304,83 +370,6 @@ int main(void) {
 
 //=========================== callback ========================================
 
-void cb_timer(void) {
-    switch (app_vars.state) {
-        case SWEEP_RX:
-            app_vars.rx_done = 1;
-            break;
-        case SWEEP_RX_DONE:
-            app_vars.state = SWEEP_TX;
-            break;
-        case SWEEP_TX:
-
-            if (app_vars.schedule_rx_ack_or_rx_timeout) {
-                radio_rxEnable();
-                radio_rxNow();
-
-                gpio_3_toggle();
-
-                app_vars.schedule_rx_ack_or_rx_timeout = 0;
-                rftimer_setCompareIn(rftimer_readCounter() + RX_ACK_TIMEOUT);
-            } else {
-                app_vars.rx_done = 1;  // rx for ack
-            }
-            break;
-		case SYNC_TIMER:
-			radio_rfOff();
-			LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
-				   (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
-				   (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
-			
-			radio_rxEnable();
-			radio_rxNow();
-			retry_index++;
-			rftimer_setCompareIn(rftimer_readCounter() + MS_IN_TICKS);
-		break;
-        case CONTINUOUSLY_CAL:
-			/*
-            if (app_vars.schedule_rx_ack_or_rx_timeout) {
-                radio_rxEnable();
-                radio_rxNow();
-
-                gpio_3_toggle();
-
-                app_vars.schedule_rx_ack_or_rx_timeout = 0;
-                rftimer_setCompareIn(rftimer_readCounter() + SENDING_INTERVAL);
-            } else
-			*/		
-			if (app_vars.retry_count <= 6) {
-				radio_rfOff();
-				LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
-					   (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
-					   (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
-				radio_rxEnable();
-                radio_rxNow();
-				if (app_vars.retry_count != 6)
-					rftimer_setCompareIn(rftimer_readCounter() + 5 * MS_IN_TICKS);
-				else {
-					rftimer_setCompareIn(app_vars.receving_count + TICKS_OF_PERIODICAL_BEACON);
-					radio_rfOff();
-				}
-				app_vars.retry_count++;
-			} else if (app_vars.inter_calibration_flag) {
-				app_vars.inter_calibration_timer_done = 1;
-			} else {
-				//printf("timer expired\r\n");
-				app_vars.retry_count = 0;
-                app_vars.rx_done = 1;
-				app_vars.periodical_timer_expired = 1;
-				app_vars.receving_count = rftimer_readCounter() - 19;
-				//printf("timer expired, %d\r\n", app_vars.receving_count);
-            }
-            break;
-        default:
-            printf("error! app_vars state = %d (code location %d)\r\n",
-                   app_vars.state, 0);
-            break;
-    }
-}
-
 void cb_startFrame_rx(uint32_t timestamp) {
     // read the  count_2M counters
     read_counters_3B(&app_vars.count_2M, &app_vars.count_LC,
@@ -404,7 +393,7 @@ void cb_endFrame_rx(uint32_t timestamp) {
     rftimer_disable_interrupts();
 
     radio_getReceivedFrame(&(pkt[0]), &pkt_len, sizeof(pkt), &rssi, &lqi);
-	// printf("%d\r\n", pkt_len);
+	printf("r:%d\r\n", pkt_len);
     if (radio_getCrcOk() && pkt_len == TARGET_PKT_SIZE) {
 
         switch (app_vars.state) {
@@ -430,14 +419,15 @@ void cb_endFrame_rx(uint32_t timestamp) {
 			case SYNC_TIMER:
 				break;
             case CONTINUOUSLY_CAL:
+				app_vars.unbroken_packet = true;
 				// adjust RX according to IF
-				app_vars.if_history[app_vars.history_index++] = radio_getIFestimate();
-				printf("IF: %d\r\n", app_vars.if_history[app_vars.history_index - 1]);
-				if (app_vars.if_history[app_vars.history_index - 1] == 0) {
-					app_vars.history_index--;
+				app_vars.if_history[app_vars.if_history_index++] = radio_getIFestimate();
+				printf("IF: %d\r\n", app_vars.if_history[app_vars.if_history_index - 1]);
+				if (app_vars.if_history[app_vars.if_history_index - 1] == 0) {
+					app_vars.if_history_index--;
 				}
-				if (app_vars.history_index == DYNAMIC_SAMPLE_SIZE) {
-					app_vars.history_index = 0;
+				if (app_vars.if_history_index == DYNAMIC_SAMPLE_SIZE) {
+					app_vars.if_history_index = 0;
 					for (i = 0; i < DYNAMIC_SAMPLE_SIZE; i++) {
 						if_avg += app_vars.if_history[i];
 					}
@@ -464,7 +454,7 @@ void cb_endFrame_rx(uint32_t timestamp) {
                 break;
         }
     }
-	app_vars.rx_done = 1;
+	app_vars.rx_done = true;
 }
 
 void cb_startFrame_tx(uint32_t timestamp) {}
@@ -537,12 +527,12 @@ void getFrequencyRx(
          app_vars.current_setting < setting_end; app_vars.current_setting++) {
         radio_rfOff();
 
-        app_vars.rx_done = 0;
+        app_vars.rx_done = false;
 
         LC_FREQCHANGE((app_vars.current_setting >> 10) & 0x001F,
                       (app_vars.current_setting >> 5) & 0x001F,
                       (app_vars.current_setting) & 0x001F);
-
+			 
         delay_turnover();
 
         delay_lc_setup();
@@ -550,7 +540,7 @@ void getFrequencyRx(
         radio_rxEnable();
         radio_rxNow();
         rftimer_setCompareIn(rftimer_readCounter() + RX_TIMEOUT);
-        while (app_vars.rx_done == 0)
+        while (app_vars.rx_done == false)
             ;
     }
 	
@@ -560,7 +550,7 @@ void getFrequencyRx(
 		    rftimer_setCompareIn(rftimer_readCounter() +
                          app_vars.beacon_stops_in * SECOND_IN_TICKS);
 
-    printf("schedule sweep Tx in %d seconds\r\n", app_vars.beacon_stops_in);
+    printf("schedule sweep Rx in %d seconds\r\n", app_vars.beacon_stops_in);
 
     // choose the median setting in the rx_settings_list as
     //      target rx frequency setting
@@ -614,14 +604,14 @@ void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
 
         radio_rfOff();
 
-        app_vars.rx_done = 0;
+        app_vars.rx_done = false;
 
         LC_FREQCHANGE(
             (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001F,
             (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001F,
             (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001F);
 
-        while (app_vars.rx_done == 0)
+        while (app_vars.rx_done == false)
             ;
     }
 	
@@ -632,7 +622,7 @@ void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
         freq_setting_selection_fo_alternative(
             app_vars.tx_settings_list, app_vars.tx_settings_freq_offset_list);
 	*/
-	app_vars.tx_setting_candidate[DEFAULT_SETTING] = ((23 & 0x001F) << 10) + ((1 & 0x001F) << 5) + (1 & 0x001F);
+	app_vars.tx_setting_candidate[DEFAULT_SETTING] = ((23 & 0x001F) << 10) + ((6 & 0x001F) << 5) + (4 & 0x001F);
     // calculate target count 2m
     //    i = 0;
     //    app_vars.target_count_2m = 0;
@@ -647,6 +637,47 @@ void getFrequencyTx(uint16_t setting_start, uint16_t setting_end) {
     app_vars.state = SWEEP_TX_DONE;
 }
 
+// ============== timer callback
+
+void cb_timer(void) {
+    switch (app_vars.state) {
+		case TIMER:
+			app_vars.inter_calibration_timer_done = true;
+        case SWEEP_RX:
+            app_vars.rx_done = true;
+            break;
+        case SWEEP_RX_DONE:
+            app_vars.state = SWEEP_TX;
+            break;
+        case SWEEP_TX:
+
+            if (app_vars.schedule_rx_ack_or_rx_timeout) {
+                radio_rxEnable();
+                radio_rxNow();
+
+                gpio_3_toggle();
+
+                app_vars.schedule_rx_ack_or_rx_timeout = false;
+                rftimer_setCompareIn(rftimer_readCounter() + RX_ACK_TIMEOUT);
+            } else {
+                app_vars.rx_done = true;  // rx for ack
+            }
+            break;
+        case CONTINUOUSLY_CAL:
+		    if (app_vars.rx_done == true) {
+				app_vars.inter_calibration_timer_done = true;
+			} else {
+				app_vars.periodical_timer_expired = true;
+			}				
+            break;
+        default:
+            printf("error! app_vars state = %d (code location %d)\r\n",
+                   app_vars.state, 0);
+            break;
+    }
+}
+
+
 //=== contiuously cal
 
 void contiuously_calibration_start(void) {
@@ -659,9 +690,6 @@ void contiuously_calibration_start(void) {
 
     while (app_vars.state != SWEEP_TX_DONE)
         ;
-	app_vars.state = SYNC_TIMER;
-	// sync the timer
-	sync_timer();
 	
     app_vars.state = CONTINUOUSLY_CAL;
 
@@ -669,86 +697,40 @@ void contiuously_calibration_start(void) {
 
     // rftimer_setCompareIn(rftimer_readCounter() + SENDING_INTERVAL);
 
-	
-	
     while (1) {
-		if (app_vars.periodical_timer_expired || app_vars.rx_done) {
-			// listen for packet
-			radio_rfOff();
-			app_vars.rx_done = 0;
-
-			LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
-				   (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
-				   (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
-
-			radio_rxEnable();
-			radio_rxNow();
-			rftimer_setCompareIn(rftimer_readCounter() + 5 * MS_IN_TICKS);
-			// sleep until rx_done becomes 1
-			while (app_vars.rx_done == 0)
-				;
-			if (app_vars.periodical_timer_expired == 0) {
-				// printf("try: %d times\r\n", app_vars.retry_count);
-				// timer is not expired, so it receive a packet
-				app_vars.retry_count = 99;
-				app_vars.rx_done = 0;
-				// start to calibrate oscillators
-				app_vars.inter_calibration_flag = 1;
-				inter_calibrate_2M_setting();
-				inter_calibrate_Tx_setting();
-				
-				rftimer_setCompareIn(app_vars.receving_count + (TICKS_OF_PERIODICAL_BEACON - 18 * MS_IN_TICKS));
-				app_vars.inter_calibration_flag = 0;
-				send_ack();
-				printf("-----------------------\r\n");
-			} else {
-				// timer is expired
-				/*
-				set_2M_RC_frequency(31, 31, 20, 12, 20);
-
-				scm3c_hw_interface_set_RC2M_coarse(20);
-				scm3c_hw_interface_set_RC2M_fine(12);
-				scm3c_hw_interface_set_RC2M_superfine(20);
-					
-				analog_scan_chain_write();
-				analog_scan_chain_load();
-				*/
-			}
-			app_vars.periodical_timer_expired = 0;
-			/*
-			// update RX settings according to IF count
-			printf("ready to inter-calibrate\r\n");
-			
-			app_vars.inter_calibration_flag = 1;
+		// listen for packet
+		app_vars.rx_done = false;
+		app_vars.unbroken_packet = false;
+		app_vars.periodical_timer_expired = false;
+		
+		LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
+		   (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
+		   (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
+		
+		radio_rxEnable();
+		radio_rxNow();
+		// scum can recive a packet within 5ms if there is no collision. some scums need to turn off its radio and turn on again so that it can receive packet
+		rftimer_setCompareIn(rftimer_readCounter() + 20 * MS_IN_TICKS);
+		//printf("before while block\r\n");
+		// if scum receive packets or the timer is expired, then scum reset the radio
+		while (app_vars.rx_done == false && app_vars.periodical_timer_expired == false)
+			;
+		//printf("after while block\r\n");
+		
+		radio_rfOff();
+		
+		if (app_vars.rx_done == true && app_vars.unbroken_packet == true) {
+			rftimer_clear_interrupts();
+			// calibrate RC and TX
 			inter_calibrate_2M_setting();
 			inter_calibrate_Tx_setting();
-			app_vars.inter_calibration_flag = 0;
-			*/
+			send_ack();
+		    printf("---------------------------------\r\n");
+		} else {
 		}
     }
 }
 
-void sync_timer(void)
-{
-	radio_rfOff();
-	app_vars.rx_done = 0;
-	LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
-               (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
-               (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
-
-	radio_rxEnable();
-    radio_rxNow();
-	
-	// to check weather RX timeout occu
-	rftimer_setCompareIn(rftimer_readCounter() + MS_IN_TICKS);
-	while (app_vars.rx_done == 0)
-        ;
-	rftimer_setCompareIn(app_vars.receving_count + (TICKS_OF_PERIODICAL_BEACON - 18 * MS_IN_TICKS));
-	// set a timer to open the radio periodically, but we need to open radio in advance
-	app_vars.periodical_timer_expired = 0;
-	app_vars.retry_count = 99;
-	app_vars.rx_done = 0;
-}
 
 void inter_calibrate_2M_setting(void)
 {
@@ -759,7 +741,7 @@ void inter_calibrate_2M_setting(void)
 	uint32_t count_2M_RC_measured;
 	int32_t adjustment_2M_RC_mid_simplified;
 	int32_t frequency_difference_RC_2M;
-	int32_t tmp;
+	int32_t i;
 	uint32_t RC2M_coarse;
     uint32_t RC2M_fine;
     uint32_t RC2M_superfine;
@@ -786,44 +768,64 @@ void inter_calibrate_2M_setting(void)
     RC2M_fine = scm3c_hw_interface_get_RC2M_fine();
     RC2M_superfine = scm3c_hw_interface_get_RC2M_superfine();
 	// simplified
-	count_LC_RX_measured = count_LC;
-	count_2M_RC_measured = count_2M;
+	app_vars.rx_lc_history[app_vars.rx_history_index] = count_LC;
+	app_vars.rx_rc_history[app_vars.rx_history_index++] = count_2M;
 	
-	// freq_distance = (count_2M_RC_measured - 100000) * 20;
-	// freq_distance /= 1930;
-	
-	//freq_distance = (count_LC_RX_measured - 125000) * 20 / 8;
+	if (app_vars.rx_history_index == HISTORY_SAMPLE_SIZE) {
+		count_LC_RX_measured = 0;
+		count_2M_RC_measured = 0;
+		app_vars.rx_history_index = 0;
 		
-	//freq = count_LC_RX_measured * 960 / MEASUREMENT_INTERVAL * 500 * 1000 / 1000000;
-	// freq = count_LC_RX_measured * 4800 / MEASUREMENT_INTERVAL;
+		for (i = 0; i < HISTORY_SAMPLE_SIZE; i++) {
+			count_LC_RX_measured += app_vars.rx_lc_history[i];
+			count_2M_RC_measured += app_vars.rx_rc_history[i];
+		}
 		
-	// beware of overflow
-	// adjustment_2M_RC_mid_simplified = (A - B) / C
-	printf("freq: %d\r\n", freq);
-	freq = 24024;
-	A = count_2M_RC_measured / 10 * freq; // MHz * Hz
-	B = 2 * count_LC_RX_measured * 960; // MHz * Hz
+		count_2M_RC_measured = count_2M_RC_measured / HISTORY_SAMPLE_SIZE;
+		count_LC_RX_measured = count_LC_RX_measured / HISTORY_SAMPLE_SIZE;
 		
-	// C = count_LC_RX_measured * 1930 * 960 / 1000 / 1000 ===> C = count_LC_RX_measured * 193 * 96 / 10000
-    // ===> C = count_LC_RX_measured * 193 * 96 / 10000  ===> 2316 / 1250 ===> 1158 / 625
-	// C = count_LC_RX_measured * 1158 / 125 ; // MHz * Hz
+		
+		// freq_distance = (count_2M_RC_measured - 100000) * 20;
+		// freq_distance /= 1930;
+		
+		//freq_distance = (count_LC_RX_measured - 125000) * 20 / 8;
+			
+		//freq = count_LC_RX_measured * 960 / MEASUREMENT_INTERVAL * 500 * 1000 / 1000000;
+		//freq = (count_LC_RX_measured * 480 / MEASUREMENT_INTERVAL * 30 + last_freq * 7) / 10;
+		freq = count_LC_RX_measured * 4800 / MEASUREMENT_INTERVAL;
+		//last_freq = freq;
+		
+			
+		// beware of overflow
+		// adjustment_2M_RC_mid_simplified = (A - B) / C
+		//freq = 24025;
+		//printf("freq: %d\r\n", freq);
+		A = count_2M_RC_measured / 10 * freq; // MHz * Hz
+		B = 2 * count_LC_RX_measured * 960; // MHz * Hz
+			
+		// C = count_LC_RX_measured * 1930 * 960 / 1000 / 1000 ===> C = count_LC_RX_measured * 193 * 96 / 10000
+		// ===> C = count_LC_RX_measured * 193 * 96 / 10000  ===> 2316 / 1250 ===> 1158 / 625
+		// C = count_LC_RX_measured * 1158 / 125 ; // MHz * Hz
+		
+		// * 1486 * 96 / 100 / 1000 ===> 4458 / 3125 ===> 743 * 6 / 125 / 25
+		// 15 * 96 / 1000 ===> 36 / 25
+		// C = count_LC_RX_measured * 36 / 5 ; // MHz * Hz
+		//printf("A: %d, B: %d, C: %d\r\n", A, B, C);
+		// adjustment_2M_RC_mid_simplified = (A - B) * 5 / C;
+		// printf("adjust_2M: %d, freq_distance: %d\r\n", adjustment_2M_RC_mid_simplified, freq_distance);
+		// RC2M_fine += (adjustment_2M_RC_mid_simplified);
+		
+		C = count_LC_RX_measured * 960 / 1000;
+		
+		frequency_difference_RC_2M = A - B;
+		// freq = 24015, freq / 10 = 2401.5   
+		// * 200 / C ===> * 20 / (freq / 10)
+		frequency_difference_RC_2M = frequency_difference_RC_2M * 1000 / C;
+		
+		update_rc_setting(frequency_difference_RC_2M, RC2M_coarse, RC2M_fine, RC2M_superfine);
+		
+	}
 	
-	// * 1486 * 96 / 100 / 1000 ===> 4458 / 3125 ===> 743 * 6 / 125 / 25
-	// 15 * 96 / 1000 ===> 36 / 25
-	// C = count_LC_RX_measured * 36 / 5 ; // MHz * Hz
-	//printf("A: %d, B: %d, C: %d\r\n", A, B, C);
-	// adjustment_2M_RC_mid_simplified = (A - B) * 5 / C;
-	// printf("adjust_2M: %d, freq_distance: %d\r\n", adjustment_2M_RC_mid_simplified, freq_distance);
-	// RC2M_fine += (adjustment_2M_RC_mid_simplified);
-	
-	C = count_LC_RX_measured * 960 / 1000;
-	
-	frequency_difference_RC_2M = A - B;
-	// freq = 24015, freq / 10 = 2401.5   
-	// * 200 / C ===> * 20 / (freq / 10)
-	frequency_difference_RC_2M = frequency_difference_RC_2M * 1000 / C;
-	
-	update_rc_setting(frequency_difference_RC_2M, RC2M_coarse, RC2M_fine, RC2M_superfine);
 	
 	printf("2M setting: %d.%d.%d\r\n", RC2M_coarse, RC2M_fine, RC2M_superfine);
 }
@@ -835,6 +837,7 @@ void inter_calibrate_Tx_setting(void)
     uint32_t count_adc;
 	uint32_t count_LC_TX_measured;
 	uint32_t count_2M_RC_measured;
+	int32_t i;
 	int32_t adjustment_LC_TX_fine_simplified;
 	int32_t frequency_difference_LC_TX;
 	volatile int32_t A;
@@ -857,34 +860,67 @@ void inter_calibrate_Tx_setting(void)
 	// read the counters again
     read_counters_3B(&count_2M, &count_LC, &count_adc);
 	printf("TX LC: %d, 2M: %d\r\n", count_LC, count_2M);
-	// simplified
-	count_LC_TX_measured = count_LC;
-	count_2M_RC_measured = count_2M;
-	
-	A = count_LC_TX_measured * 2 * 960; // MHz * Hz
-	B = (count_2M_RC_measured / 10) * (24050); // MHz * Hz
-	// printf("B: %d\r\n", B); // don't delete this line
-
-	
-	// 130.9KHz / 1000 ===> * 1309 / 10000
-	C = count_2M_RC_measured * (Hz_TX_LC_per_fine_code / 100) / 10000; // MHz * Hz0
-	adjustment_LC_TX_fine_simplified = (A - B) / C;
-	//printf("adjust_LC: %d\r\n", adjustment_LC_TX_fine_simplified);
-	app_vars.tx_setting_candidate[DEFAULT_SETTING] -= adjustment_LC_TX_fine_simplified;
-	lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
-	
 		
-	/*
-	C = 2;
-	// printf("A: %d, B: %d, C: %d\r\n", A, B, C);
-	frequency_difference_LC_TX = A - B;	
-	frequency_difference_LC_TX = frequency_difference_LC_TX * 20 / C;
-	// adjustment_LC_TX_fine_simplified = frequency_difference_LC_TX / Hz_TX_LC_per_fine_code;
-	// app_vars.tx_setting_candidate[DEFAULT_SETTING] = app_vars.tx_setting_candidate[DEFAULT_SETTING] - adjustment_LC_TX_fine_simplified;
-	// lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
-	update_tx_setting(frequency_difference_LC_TX);
-	*/
 	
+	app_vars.tx_lc_history[app_vars.tx_history_index] = count_LC;
+	app_vars.tx_rc_history[app_vars.tx_history_index++] = count_2M;
+	// simplified
+	if (app_vars.tx_history_index == HISTORY_SAMPLE_SIZE) {
+		count_LC_TX_measured = 0;
+		count_2M_RC_measured = 0;
+		app_vars.tx_history_index = 0;
+		
+		for (i = 0; i < HISTORY_SAMPLE_SIZE; i++) {
+			count_LC_TX_measured += app_vars.tx_lc_history[i];
+			count_2M_RC_measured += app_vars.tx_rc_history[i];
+		}
+		
+		count_2M_RC_measured = count_2M_RC_measured / HISTORY_SAMPLE_SIZE;
+		count_LC_TX_measured = count_LC_TX_measured / HISTORY_SAMPLE_SIZE;
+		/*
+		if(last_count_TX_LC == 0)
+			last_count_TX_LC = count_LC;
+		if(last_count_TX_RC == 0)
+			last_count_TX_RC = count_2M;
+		count_LC_TX_measured = (count_LC * 8 + last_count_TX_LC * 2) / 10;
+		count_2M_RC_measured = (count_2M * 8 + last_count_TX_RC * 2) / 10; 
+		last_count_TX_RC = count_LC_TX_measured;
+		last_count_TX_RC = count_2M_RC_measured;
+		*/
+		
+		/*
+		A = count_LC_TX_measured * 2 * 960; // MHz * Hz
+		B = (count_2M_RC_measured / 10) * (freq + 45); // MHz * Hz
+		// 130.9KHz / 1000 ===> * 1309 / 10000
+		C =  count_2M_RC_measured * (Hz_TX_LC_per_fine_code / 100) / 10000; // MHz * Hz0
+		
+		adjustment_LC_TX_fine_simplified = (A - B) / C;
+		*/
+		/*
+		A = count_LC_TX_measured * 96 * 2; // MHz * Hz
+		B = (1000) * (freq + 50) ; // MHz * Hz
+		// 130.9KHz / 1000 ===> * 1309 / 10000
+		C =  Hz_TX_LC_per_fine_code; // MHz * Hz0
+		adjustment_LC_TX_fine_simplified = (A - B) / (C / 100);
+		*/
+		/*
+		app_vars.tx_setting_candidate[DEFAULT_SETTING] -= adjustment_LC_TX_fine_simplified;
+		lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
+		*/
+			
+		
+		A = count_LC_TX_measured * 2 * 960; // MHz * Hz
+		B = (count_2M_RC_measured / 10) * (freq + 50); // MHz * Hz
+		C = 2;
+		// printf("A: %d, B: %d, C: %d\r\n", A, B, C);
+		frequency_difference_LC_TX = A - B;	
+		frequency_difference_LC_TX = frequency_difference_LC_TX * 20 / C;
+		// adjustment_LC_TX_fine_simplified = frequency_difference_LC_TX / Hz_TX_LC_per_fine_code;
+		// app_vars.tx_setting_candidate[DEFAULT_SETTING] = app_vars.tx_setting_candidate[DEFAULT_SETTING] - adjustment_LC_TX_fine_simplified;
+		// lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
+		update_tx_setting(frequency_difference_LC_TX);
+		
+	}
 	printf("TX setting:%d.%d.%d\r\n", (app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
 										(app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
 										(app_vars.tx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
@@ -902,8 +938,8 @@ void send_ack(void)
 	
 	pkt[1] = (packet_idx & 0xff000000) >> 24;
 	pkt[2] = (packet_idx & 0x00ff0000) >> 16;
-	pkt[3] = (packet_idx & 0x0000ff00) >> 8;
-	pkt[4] = (packet_idx & 0x000000ff);
+	pkt[1] = (packet_idx & 0x0000ff00) >> 8;
+	pkt[2] = (packet_idx & 0x000000ff);
 	
 	packet_idx++;
     radio_loadPacket(pkt, TARGET_PKT_SIZE);
@@ -916,6 +952,7 @@ void send_ack(void)
 
     radio_txNow();
     while (app_vars.tx_done == 0){};
+	radio_rfOff();
 }
 
 void update_rc_setting(int32_t frequency_difference_RC_2M, uint32_t RC2M_coarse, uint32_t RC2M_fine, uint32_t RC2M_superfine)
@@ -993,92 +1030,6 @@ void update_tx_setting(int32_t frequency_difference_TX_LC)
 	app_vars.tx_setting_candidate[DEFAULT_SETTING] -= (adjustment_middle_code << 5);
 	app_vars.tx_setting_candidate[DEFAULT_SETTING] = (app_vars.tx_setting_candidate[DEFAULT_SETTING] & (~0x001f)) + (adjusted_fine_code & 0x001f);
 	
-}
-
-void update_target_settings(void) {
-    uint8_t i;
-    uint32_t avg_if;
-    int32_t adjustment;
-    int32_t tmp;
-    int16_t avg_fo;
-    uint32_t avg_count_2M;
-
-    uint32_t RC2M_coarse;
-    uint32_t RC2M_fine;
-    uint32_t RC2M_superfine;
-
-    // update target setting for RX
-    avg_if = 0;
-    for (i = 0; i < HISTORY_SAMPLE_SIZE; i++) {
-        avg_if += app_vars.if_history[i];
-    }
-    avg_if /= HISTORY_SAMPLE_SIZE;
-
-    adjustment = ((int32_t)(avg_if - 500)) / 17;
-    app_vars.rx_setting_candidate[app_vars.setting_index] += adjustment;
-
-    // update target setting for TX
-    avg_fo = 0;
-    for (i = 0; i < HISTORY_SAMPLE_SIZE; i++) {
-        avg_fo += app_vars.fo_history[i];
-    }
-    avg_fo /= HISTORY_SAMPLE_SIZE;
-
-    adjustment = (int16_t)(avg_fo + 8) / 9;
-    app_vars.tx_setting_candidate[app_vars.setting_index] -= adjustment;
-
-    // update target setting for 2M RC OSC
-    avg_count_2M = 0;
-    for (i = 0; i < HISTORY_SAMPLE_SIZE; i++) {
-        avg_count_2M += app_vars.count_2m_history[i];
-    }
-    avg_count_2M /= HISTORY_SAMPLE_SIZE;
-
-    RC2M_coarse = scm3c_hw_interface_get_RC2M_coarse();
-    RC2M_fine = scm3c_hw_interface_get_RC2M_fine();
-    RC2M_superfine = scm3c_hw_interface_get_RC2M_superfine();
-
-    adjustment = (int32_t)(avg_count_2M - app_vars.target_count_2m);
-    if (adjustment >= 331 || adjustment <= -331) {
-        tmp = adjustment / 331;
-        RC2M_coarse += tmp;
-        adjustment = adjustment - tmp * 331;
-    }
-
-    if (adjustment >= 58 || adjustment <= -58) {
-        tmp = adjustment / 58;
-        RC2M_fine += tmp;
-        adjustment = adjustment - tmp * 58;
-    }
-
-    //    if (adjustment >= 7 || adjustment <= -7) {
-    //        tmp               = adjustment/7;
-    //        RC2M_superfine   += tmp;
-    //    }
-		
-    set_2M_RC_frequency(31, 31, RC2M_coarse, RC2M_fine, RC2M_superfine);
-
-    scm3c_hw_interface_set_RC2M_coarse(RC2M_coarse);
-    scm3c_hw_interface_set_RC2M_fine(RC2M_fine);
-    scm3c_hw_interface_set_RC2M_superfine(RC2M_superfine);
-		
-    analog_scan_chain_write();
-    analog_scan_chain_load();
-
-    // output for plot
-
-    printf(
-        "TX setting %d %d %d (avg_fo=%d) | RX setting %d %d %d (avg_if=%d) | "
-        "2M setting %d %d %d (avg_count_2M=%d) | temp=%d\r\n",
-        (app_vars.tx_setting_candidate[app_vars.setting_index] >> 10) & 0x001f,
-        (app_vars.tx_setting_candidate[app_vars.setting_index] >> 5) & 0x001f,
-        (app_vars.tx_setting_candidate[app_vars.setting_index]) & 0x001f,
-        avg_fo,
-        (app_vars.rx_setting_candidate[app_vars.setting_index] >> 10) & 0x001f,
-        (app_vars.rx_setting_candidate[app_vars.setting_index] >> 5) & 0x001f,
-        (app_vars.rx_setting_candidate[app_vars.setting_index]) & 0x001f,
-        avg_if, RC2M_coarse, RC2M_fine, RC2M_superfine, avg_count_2M,
-        app_vars.last_temperature);
 }
 
 //=== switch lc setting between main and candidate settings
