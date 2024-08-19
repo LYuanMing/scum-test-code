@@ -46,9 +46,9 @@ This calibration only applies on on signel channel, e.g. channel 11.
 #define MS_IN_TICKS 500 // 500 = 1ms@500kHz
 
 #define MAX_PKT_SIZE 125 + LENGTH_CRC
-#define TARGET_PKT_SIZE 3 + LENGTH_CRC
+#define TARGET_PKT_SIZE 4 + LENGTH_CRC
 
-#define HISTORY_SAMPLE_SIZE 10
+#define HISTORY_SAMPLE_SIZE 5
 
 #define ACK_IN_MS 30
 #define TICK_IN_MS 500
@@ -80,7 +80,8 @@ This calibration only applies on on signel channel, e.g. channel 11.
 // frequency difference in TX middle code is about 794.8616541470408  KHz
 // frequency difference in TX find code is about 130.90244749698303  KHz
 #define Hz_TX_LC_per_fine_code 130902
-#define Hz_TX_LC_per_middle_code 794861
+// #define Hz_TX_LC_per_middle_code 794861
+#define Hz_TX_LC_per_middle_code 860314
 #define Hz_TX_LC_per_coarse_code 14663148
 
 //=========================== variables =======================================
@@ -93,6 +94,7 @@ typedef enum {
 	SYNC_TIMER = 4,
     CONTINUOUSLY_CAL = 5,
 	TIMER = 6,
+	MUTUAL_COMMUNICATION = 7,
 } state_t;
 
 typedef struct {
@@ -162,8 +164,9 @@ uint8_t DYNAMIC_SAMPLE_SIZE = 1;
 /*
 uint32_t last_count_TX_LC = 0;
 uint32_t last_count_TX_RC = 0;
-uint32_t last_freq = 24050;
 */
+uint32_t last_freq = 24025;
+
 //=========================== prototypes ======================================
 
 void cb_timer(void);
@@ -182,10 +185,11 @@ void delay_turnover(void);
 void delay_tx(void);
 void delay_lc_setup(void);
 
-void sync_timer(void);
 void inter_calibrate_2M_setting(void);
 void inter_calibrate_Tx_setting(void);
+void listen_packet(void);
 void send_ack(void);
+void mutual_communication(void);
 void update_rc_setting(int32_t frequency_difference_RC_2M, uint32_t RC2M_coarse, uint32_t RC2M_fine, uint32_t RC2M_superfine);
 void update_tx_setting(int32_t frequency_difference_TX_LC);
 //=========================== main ============================================
@@ -266,6 +270,7 @@ int main(void) {
 	#if 0
 	for(i = 15; i <= 16; i++) 
 	#endif
+	#if 1
 	{
 		
 		
@@ -301,10 +306,15 @@ int main(void) {
 		printf("difference: %d\r\n\r\n", count_LC - count_RX_LC);
 	}
 	
+	#endif
 		
 		
 	
-		
+	#if VERSION_0
+	printf("version 0\r\n");
+	#elif VERSION_1
+	printf("version 1\r\n");
+	#endif
 		
     app_vars.state = SWEEP_RX;
 
@@ -417,6 +427,9 @@ void cb_endFrame_rx(uint32_t timestamp) {
                 app_vars.tx_list_index++;
                 break;
 			case SYNC_TIMER:
+				break;
+			case MUTUAL_COMMUNICATION:
+				app_vars.unbroken_packet = true;
 				break;
             case CONTINUOUSLY_CAL:
 				app_vars.unbroken_packet = true;
@@ -663,6 +676,7 @@ void cb_timer(void) {
                 app_vars.rx_done = true;  // rx for ack
             }
             break;
+		case MUTUAL_COMMUNICATION:
         case CONTINUOUSLY_CAL:
 		    if (app_vars.rx_done == true) {
 				app_vars.inter_calibration_timer_done = true;
@@ -679,6 +693,30 @@ void cb_timer(void) {
 
 
 //=== contiuously cal
+
+void listen_packet(void)
+{
+	// listen for packet
+	app_vars.rx_done = false;
+	app_vars.unbroken_packet = false;
+	app_vars.periodical_timer_expired = false;
+	
+	LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
+	   (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
+	   (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
+	
+	radio_rxEnable();
+	radio_rxNow();
+	// scum can recive a packet within 5ms if there is no collision. some scums need to turn off its radio and turn on again so that it can receive packet
+	// rftimer_setCompareIn(rftimer_readCounter() + 20 * MS_IN_TICKS);
+	//printf("before while block\r\n");
+	// if scum receive packets or the timer is expired, then scum reset the radio
+	while (app_vars.rx_done == false && app_vars.periodical_timer_expired == false)
+		;
+	//printf("after while block\r\n");
+	
+	radio_rfOff();
+}
 
 void contiuously_calibration_start(void) {
     uint8_t i;
@@ -698,33 +736,16 @@ void contiuously_calibration_start(void) {
     // rftimer_setCompareIn(rftimer_readCounter() + SENDING_INTERVAL);
 
     while (1) {
-		// listen for packet
-		app_vars.rx_done = false;
-		app_vars.unbroken_packet = false;
-		app_vars.periodical_timer_expired = false;
-		
-		LC_FREQCHANGE((app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 10) & 0x001f,
-		   (app_vars.rx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
-		   (app_vars.rx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
-		
-		radio_rxEnable();
-		radio_rxNow();
-		// scum can recive a packet within 5ms if there is no collision. some scums need to turn off its radio and turn on again so that it can receive packet
-		rftimer_setCompareIn(rftimer_readCounter() + 20 * MS_IN_TICKS);
-		//printf("before while block\r\n");
-		// if scum receive packets or the timer is expired, then scum reset the radio
-		while (app_vars.rx_done == false && app_vars.periodical_timer_expired == false)
-			;
-		//printf("after while block\r\n");
-		
-		radio_rfOff();
+		rftimer_setCompareIn(rftimer_readCounter() + 5 * MS_IN_TICKS);
+		listen_packet();
 		
 		if (app_vars.rx_done == true && app_vars.unbroken_packet == true) {
 			rftimer_clear_interrupts();
 			// calibrate RC and TX
 			inter_calibrate_2M_setting();
 			inter_calibrate_Tx_setting();
-			send_ack();
+			mutual_communication();
+			//send_ack();
 		    printf("---------------------------------\r\n");
 		} else {
 		}
@@ -752,14 +773,14 @@ void inter_calibrate_2M_setting(void)
 	int32_t freq_distance;
 	
 	// start a timer
-	app_vars.inter_calibration_timer_done = 0;
+	app_vars.inter_calibration_timer_done = false;
 	rftimer_setCompareIn(rftimer_readCounter() + MEASUREMENT_INTERVAL);
 	
 	// only for resetting the counters
     read_counters_3B(&count_2M, &count_LC, &count_adc);
 	radio_rxEnable();
 	// waiting for the timer to end
-	while(app_vars.inter_calibration_timer_done == 0){};
+	while(app_vars.inter_calibration_timer_done == false){};
 	
 	// read the counters again
     read_counters_3B(&count_2M, &count_LC, &count_adc);
@@ -791,14 +812,14 @@ void inter_calibrate_2M_setting(void)
 		//freq_distance = (count_LC_RX_measured - 125000) * 20 / 8;
 			
 		//freq = count_LC_RX_measured * 960 / MEASUREMENT_INTERVAL * 500 * 1000 / 1000000;
-		//freq = (count_LC_RX_measured * 480 / MEASUREMENT_INTERVAL * 30 + last_freq * 7) / 10;
-		freq = count_LC_RX_measured * 4800 / MEASUREMENT_INTERVAL;
-		//last_freq = freq;
+		freq = ((count_LC_RX_measured * 4800 / MEASUREMENT_INTERVAL) * 2 + last_freq * 8) / 10;
+		//freq = count_LC_RX_measured * 4800 / MEASUREMENT_INTERVAL;
+		last_freq = freq;
 		
 			
 		// beware of overflow
 		// adjustment_2M_RC_mid_simplified = (A - B) / C
-		//freq = 24025;
+		// freq = 24025;
 		//printf("freq: %d\r\n", freq);
 		A = count_2M_RC_measured / 10 * freq; // MHz * Hz
 		B = 2 * count_LC_RX_measured * 960; // MHz * Hz
@@ -847,7 +868,7 @@ void inter_calibrate_Tx_setting(void)
                (app_vars.tx_setting_candidate[DEFAULT_SETTING] >> 5) & 0x001f,
                (app_vars.tx_setting_candidate[DEFAULT_SETTING]) & 0x001f);
 	// start a timer
-	app_vars.inter_calibration_timer_done = 0;
+	app_vars.inter_calibration_timer_done = false;
 	rftimer_setCompareIn(rftimer_readCounter() + MEASUREMENT_INTERVAL);
 	
 	// only for resetting the counters
@@ -855,7 +876,7 @@ void inter_calibrate_Tx_setting(void)
 	radio_txEnable();
 	
 	// waiting for the timer to end
-	while(app_vars.inter_calibration_timer_done == 0){};
+	while(app_vars.inter_calibration_timer_done == false){};
 	
 	// read the counters again
     read_counters_3B(&count_2M, &count_LC, &count_adc);
@@ -908,9 +929,15 @@ void inter_calibrate_Tx_setting(void)
 		lc_setting_edge_detection(app_vars.tx_setting_candidate, 1);
 		*/
 			
-		
+			printf("freq: %d, avg_rc: %d, avg_lc: %d\r\n", freq, count_2M_RC_measured, count_LC_TX_measured);
+			
 		A = count_LC_TX_measured * 2 * 960; // MHz * Hz
-		B = (count_2M_RC_measured / 10) * (freq + 50); // MHz * Hz
+		#if VERSION_0
+		B = (10000) * (freq + 70); // MHz * Hz
+		#elif VERSION_1
+		B = (10000) * (freq + 75); // MHz * Hz
+		//B = (count_2M_RC_measured / 10) * (freq + 43); // MHz * Hz
+		#endif
 		C = 2;
 		// printf("A: %d, B: %d, C: %d\r\n", A, B, C);
 		frequency_difference_LC_TX = A - B;	
@@ -927,6 +954,61 @@ void inter_calibrate_Tx_setting(void)
 	
 }
 
+void mutual_communication(void)
+{
+	app_vars.state = MUTUAL_COMMUNICATION;
+	#if VERSION_0
+	// wait 25ms
+	app_vars.inter_calibration_timer_done = false;
+	rftimer_setCompareIn(rftimer_readCounter() + 25 * MS_IN_TICKS);
+	while (app_vars.inter_calibration_timer_done == false);
+	
+	
+	// send packet
+	send_ack();
+	
+	// listen packet for 70ms
+	app_vars.inter_calibration_timer_done = false;
+	rftimer_setCompareIn(rftimer_readCounter() + 60 * MS_IN_TICKS);
+	
+	// listen packet
+	listen_packet();
+	
+	if (app_vars.rx_done == true && app_vars.unbroken_packet == true) {
+		rftimer_clear_interrupts();
+		printf("dev1-->dev0\r\n");
+	} else {
+		
+	}
+	
+	#elif VERSION_1
+	
+	// listen for 75ms
+	app_vars.inter_calibration_timer_done = false;
+	rftimer_setCompareIn(rftimer_readCounter() + 75 * MS_IN_TICKS);
+	listen_packet();
+	
+	rftimer_enable_interrupts();
+	
+	if (app_vars.rx_done == true && app_vars.unbroken_packet == true) {
+		// clear timer
+		rftimer_clear_interrupts();
+		// sync with device0 and listen packet for 50ms
+		rftimer_setCompareIn(rftimer_readCounter() + 50 * MS_IN_TICKS);
+		printf("dev0-->dev1\r\n");
+	} else {
+		
+	}
+	
+	// wait
+	while (app_vars.inter_calibration_timer_done == false && app_vars.periodical_timer_expired == false);
+	// send packet
+	send_ack();
+	
+	#endif
+	app_vars.state = CONTINUOUSLY_CAL;
+}
+
 void send_ack(void)
 {
     uint8_t pkt[TARGET_PKT_SIZE];
@@ -935,11 +1017,15 @@ void send_ack(void)
 	app_vars.tx_done = 0;
 	printf("packet_idx: %d\r\n", packet_idx);
     pkt[0] = 'P';
-	
-	pkt[1] = (packet_idx & 0xff000000) >> 24;
-	pkt[2] = (packet_idx & 0x00ff0000) >> 16;
-	pkt[1] = (packet_idx & 0x0000ff00) >> 8;
-	pkt[2] = (packet_idx & 0x000000ff);
+	#if VERSION_0
+	pkt[1] = '0';
+	#elif VERSION_1
+	pkt[1] = '1';
+	#endif
+	//pkt[3] = (packet_idx & 0xff000000) >> 24;
+	//pkt[4] = (packet_idx & 0x00ff0000) >> 16;
+	pkt[2] = (packet_idx & 0x0000ff00) >> 8;
+	pkt[3] = (packet_idx & 0x000000ff);
 	
 	packet_idx++;
     radio_loadPacket(pkt, TARGET_PKT_SIZE);
